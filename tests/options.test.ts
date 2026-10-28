@@ -1,0 +1,352 @@
+import { beforeEach, expect, test } from "bun:test";
+import { DAILY_REQUEST_BUDGET } from "../src/cache";
+import { today } from "../src/decide";
+import { collectForm, main, populateForm, renderDiagnostics } from "../src/options";
+import { DEFAULT_TYPESAFE_MODEL } from "../src/providers/typesafe";
+import { DEFAULT_SETTINGS, budgetKey, sigKey } from "../src/storage";
+import type { Settings, SiteId } from "../src/types";
+
+const HTML = await Bun.file(`${import.meta.dir}/../public/options.html`).text();
+
+const SITES: SiteId[] = ["youtube", "x", "instagram", "linkedin"];
+
+const store: Record<string, unknown> = {};
+const sent: unknown[] = [];
+const recordMessage = async (msg: unknown): Promise<unknown> => {
+  sent.push(msg);
+  return undefined;
+};
+let sendMessage: (msg: unknown) => Promise<unknown> = recordMessage;
+
+const clone = <T>(v: T): T => (v === undefined ? v : (JSON.parse(JSON.stringify(v)) as T));
+
+Object.assign(globalThis, {
+  chrome: {
+    storage: {
+      local: {
+        get: async (key: string) => (key in store ? { [key]: clone(store[key]) } : {}),
+        set: async (values: Record<string, unknown>) => {
+          Object.assign(store, clone(values));
+        }
+      }
+    },
+    runtime: { sendMessage: (msg: unknown) => sendMessage(msg) }
+  }
+});
+
+beforeEach(() => {
+  for (const key of Object.keys(store)) delete store[key];
+  sent.length = 0;
+  sendMessage = recordMessage;
+});
+
+const page = (): Document => new DOMParser().parseFromString(HTML, "text/html");
+
+const $ = <T extends Element>(doc: Document, id: string): T => {
+  const el = doc.querySelector<T>(`#${id}`);
+  if (!el) throw new Error(`missing #${id}`);
+  return el;
+};
+
+const input = (doc: Document, id: string) => $<HTMLInputElement>(doc, id);
+const select = (doc: Document, id: string) => $<HTMLSelectElement>(doc, id);
+const rowsOf = (doc: Document, site: SiteId) => Array.from($(doc, `diag-${site}`).querySelectorAll("tbody tr"));
+const cells = (row: Element | undefined) => Array.from(row?.querySelectorAll("td") ?? []).map((td) => td.textContent?.trim() ?? "");
+
+/** Resolves with the status element's next data-state value; the observer is attached BEFORE the trigger runs. */
+const nextState = (doc: Document, trigger: () => void, timeoutMs = 2000): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const status = $<HTMLElement>(doc, "status");
+    const observer = new MutationObserver(() => {
+      const state = status.dataset.state;
+      if (!state) return;
+      clearTimeout(timer);
+      observer.disconnect();
+      resolve(state);
+    });
+    const timer = setTimeout(() => {
+      observer.disconnect();
+      reject(new Error("status data-state never changed"));
+    }, timeoutMs);
+    observer.observe(status, { attributes: true, attributeFilter: ["data-state"] });
+    trigger();
+  });
+
+const FULL: Settings = {
+  provider: "typesafe",
+  openai: { apiKey: "sk-openai", model: "gpt-6-luna-mini" },
+  typesafe: { apiKey: "ts-key", model: "jev-1.14.0" },
+  sites: {
+    youtube: { enabled: true },
+    x: { enabled: false },
+    instagram: { enabled: true },
+    linkedin: { enabled: false }
+  },
+  actions: { ad: "hide", suggested: "blur", module: "keep" }
+};
+
+const cacheOf = (day: string, providerKey: string, entries: Record<string, unknown>, order: unknown = Object.keys(entries)) => ({
+  day,
+  providerKey,
+  entries,
+  order
+});
+
+test("markup: lang=ko, masked key fields, no remote assets, no free-text goal fields", () => {
+  const doc = page();
+  expect(doc.documentElement.getAttribute("lang")).toBe("ko");
+  for (const id of ["openai-key", "typesafe-key"]) {
+    expect(input(doc, id).type).toBe("password");
+    expect(input(doc, id).getAttribute("autocomplete")).toBe("off");
+  }
+  expect(doc.querySelectorAll("textarea").length).toBe(0);
+  expect(Array.from(doc.querySelectorAll("script")).map((s) => s.getAttribute("src"))).toEqual(["options.js"]);
+  expect(doc.querySelectorAll("link, iframe, img, video, audio, object, embed").length).toBe(0);
+  expect(HTML).not.toMatch(/https?:\/\//);
+  expect(HTML).not.toMatch(/@import/);
+  expect(HTML).not.toMatch(/url\(/);
+  expect(Array.from(doc.querySelectorAll<HTMLInputElement>('input[name="provider"]')).map((r) => r.value)).toEqual(["openai", "typesafe"]);
+  for (const site of SITES) expect(input(doc, `site-${site}`).type).toBe("checkbox");
+  for (const category of ["ad", "suggested", "module"]) {
+    const values = Array.from(select(doc, `action-${category}`).querySelectorAll("option")).map((o) => o.value);
+    expect(values).toEqual(["hide", "blur", "keep"]);
+  }
+});
+
+test("the untouched page collects to DEFAULT_SETTINGS", () => {
+  expect(collectForm(page())).toStrictEqual(DEFAULT_SETTINGS);
+});
+
+test("collectForm maps every control into an exact Settings object", () => {
+  const doc = page();
+  input(doc, "provider-typesafe").checked = true;
+  input(doc, "openai-key").value = "  sk-openai  ";
+  input(doc, "openai-model").value = " gpt-6-luna-mini ";
+  input(doc, "typesafe-key").value = "ts-key";
+  input(doc, "typesafe-model").value = "jev-1.14.0";
+  input(doc, "site-youtube").checked = true;
+  input(doc, "site-x").checked = false;
+  input(doc, "site-instagram").checked = true;
+  input(doc, "site-linkedin").checked = false;
+  select(doc, "action-ad").value = "hide";
+  select(doc, "action-suggested").value = "blur";
+  select(doc, "action-module").value = "keep";
+
+  const collected = collectForm(doc);
+  expect(collected).toStrictEqual(FULL);
+  expect(Object.keys(collected).sort()).toEqual(["actions", "openai", "provider", "sites", "typesafe"]);
+  expect(Object.keys(collected.sites)).toEqual(SITES);
+  expect(Object.keys(collected.actions)).toEqual(["ad", "suggested", "module"]);
+});
+
+test("an empty or blank model field falls back to that provider's default, never an empty string", () => {
+  const doc = page();
+  input(doc, "openai-model").value = "";
+  input(doc, "typesafe-model").value = "   ";
+  const s = collectForm(doc);
+  expect(s.openai.model).toBe(DEFAULT_SETTINGS.openai.model);
+  expect(s.typesafe.model).toBe(DEFAULT_TYPESAFE_MODEL);
+  expect(DEFAULT_SETTINGS.openai.model).toBe("gpt-6-luna");
+  expect(DEFAULT_TYPESAFE_MODEL).toBe("jev-latest");
+});
+
+test("malformed input: a select forced to an unknown value collects as that category's default", () => {
+  const doc = page();
+  select(doc, "action-suggested").value = "bogus";
+  expect(select(doc, "action-suggested").value).toBe("");
+  expect(collectForm(doc).actions).toStrictEqual(DEFAULT_SETTINGS.actions);
+});
+
+test("populateForm then collectForm round-trips a full Settings object", () => {
+  const doc = page();
+  populateForm(FULL, doc);
+  expect(input(doc, "provider-typesafe").checked).toBe(true);
+  expect(input(doc, "provider-openai").checked).toBe(false);
+  expect(input(doc, "openai-key").value).toBe("sk-openai");
+  expect(input(doc, "site-x").checked).toBe(false);
+  expect(select(doc, "action-module").value).toBe("keep");
+  expect(collectForm(doc)).toStrictEqual(FULL);
+
+  populateForm(DEFAULT_SETTINGS, doc);
+  expect(input(doc, "provider-openai").checked).toBe(true);
+  expect(input(doc, "provider-typesafe").checked).toBe(false);
+  expect(collectForm(doc)).toStrictEqual(DEFAULT_SETTINGS);
+});
+
+test("renderDiagnostics: one row per signalKey, '-' for null, two decimals, day, providerKey and budget", () => {
+  const doc = page();
+  const cache = cacheOf("2026-10-28", "openai:gpt-6-luna:1", {
+    k1: { ad: 0.9, suggested: null },
+    k2: { ad: 0.123, suggested: 0.5 },
+    k3: { ad: null, suggested: null }
+  });
+  renderDiagnostics({ day: "2026-10-28", currentKey: "openai:gpt-6-luna:1", caches: { youtube: cache }, budgetUsed: 7 }, doc);
+
+  const yt = $<HTMLElement>(doc, "diag-youtube");
+  const rows = rowsOf(doc, "youtube");
+  expect(rows.length).toBe(3);
+  expect(cells(rows[0])).toEqual(["k1", "0.90", "-"]);
+  expect(cells(rows[1])).toEqual(["k2", "0.12", "0.50"]);
+  expect(cells(rows[2])).toEqual(["k3", "-", "-"]);
+  expect(yt.dataset.rows).toBe("3");
+  expect(yt.dataset.day).toBe("2026-10-28");
+  expect(yt.dataset.providerKey).toBe("openai:gpt-6-luna:1");
+  expect(yt.dataset.stale).toBe("false");
+  expect(yt.textContent).toContain("2026-10-28");
+  expect(yt.textContent).toContain("openai:gpt-6-luna:1");
+
+  for (const site of ["x", "instagram", "linkedin"] as const) {
+    expect(rowsOf(doc, site).length).toBe(0);
+    expect($<HTMLElement>(doc, `diag-${site}`).dataset.rows).toBe("0");
+  }
+  expect($(doc, "diagnostics").querySelectorAll("section").length).toBe(4);
+
+  const budget = $<HTMLElement>(doc, "budget");
+  expect(budget.dataset.used).toBe("7");
+  expect(budget.dataset.limit).toBe(String(DAILY_REQUEST_BUDGET));
+  expect(budget.textContent).toContain("7");
+  expect(budget.textContent).toContain(String(DAILY_REQUEST_BUDGET));
+});
+
+test("renderDiagnostics follows the cache's own order and appends entries missing from it", () => {
+  const doc = page();
+  const cache = cacheOf("2026-10-28", "k", { a: { ad: 0, suggested: 1 }, b: { ad: 1, suggested: 0 }, c: { ad: 0.5, suggested: 0.5 } }, ["c", "a", "gone", "c"]);
+  renderDiagnostics({ day: "2026-10-28", currentKey: "k", caches: { linkedin: cache }, budgetUsed: 0 }, doc);
+  expect(rowsOf(doc, "linkedin").map((r) => cells(r)[0])).toEqual(["c", "a", "b"]);
+  expect(cells(rowsOf(doc, "linkedin")[0])).toEqual(["c", "0.50", "0.50"]);
+  expect(cells(rowsOf(doc, "linkedin")[1])).toEqual(["a", "0.00", "1.00"]);
+});
+
+test("stale_state: a cache with another providerKey or day still renders, labelled with its own values", () => {
+  const doc = page();
+  const cache = cacheOf("2026-10-27", "typesafe:jev-latest:1", { a: { ad: 1, suggested: 0 } });
+  renderDiagnostics({ day: "2026-10-28", currentKey: "openai:gpt-6-luna:1", caches: { x: cache }, budgetUsed: 0 }, doc);
+  const x = $<HTMLElement>(doc, "diag-x");
+  expect(x.dataset.providerKey).toBe("typesafe:jev-latest:1");
+  expect(x.dataset.day).toBe("2026-10-27");
+  expect(x.dataset.stale).toBe("true");
+  expect(cells(rowsOf(doc, "x")[0])).toEqual(["a", "1.00", "0.00"]);
+  expect(x.textContent).toContain("typesafe:jev-latest:1");
+});
+
+test("malformed input: broken caches and a malformed budget render without throwing", () => {
+  const doc = page();
+  const linkedin = cacheOf(
+    "2026-10-28",
+    "k",
+    { good: { ad: 0.5, suggested: 0.25 }, bad1: "x", bad2: { ad: "high", suggested: null }, bad3: null, bad4: { ad: Number.NaN, suggested: Number.POSITIVE_INFINITY } },
+    5
+  );
+  renderDiagnostics(
+    { day: "2026-10-28", currentKey: "k", caches: { youtube: 42, x: "junk", instagram: null, linkedin }, budgetUsed: Number.NaN },
+    doc
+  );
+  expect(rowsOf(doc, "linkedin").map((r) => cells(r))).toEqual([
+    ["good", "0.50", "0.25"],
+    ["bad1", "-", "-"],
+    ["bad2", "-", "-"],
+    ["bad3", "-", "-"],
+    ["bad4", "-", "-"]
+  ]);
+  for (const site of ["youtube", "x", "instagram"] as const) expect(rowsOf(doc, site).length).toBe(0);
+  expect($<HTMLElement>(doc, "budget").dataset.used).toBe("0");
+
+  const shapeless = cacheOf("2026-10-28", "k", {}, []);
+  renderDiagnostics({ day: "2026-10-28", currentKey: "k", caches: { youtube: { day: 7 }, x: { entries: [] }, instagram: shapeless }, budgetUsed: -3 }, doc);
+  for (const site of SITES) expect(rowsOf(doc, site).length).toBe(0);
+  expect($<HTMLElement>(doc, "budget").dataset.used).toBe("0");
+});
+
+test("main(): partial, legacy and garbage stored settings populate the form from defaults without throwing", async () => {
+  const cases: [unknown, Settings][] = [
+    [undefined, DEFAULT_SETTINGS],
+    [42, DEFAULT_SETTINGS],
+    [null, DEFAULT_SETTINGS],
+    ["nope", DEFAULT_SETTINGS],
+    [{ apiKey: "sk-old", model: "jev-latest", goals: { youtube: "less noise" } }, DEFAULT_SETTINGS],
+    [
+      { provider: "typesafe", sites: { x: { enabled: false } }, actions: { module: "keep" } },
+      { ...DEFAULT_SETTINGS, provider: "typesafe", sites: { ...DEFAULT_SETTINGS.sites, x: { enabled: false } }, actions: { ...DEFAULT_SETTINGS.actions, module: "keep" } }
+    ]
+  ];
+  for (const [stored, expected] of cases) {
+    for (const key of Object.keys(store)) delete store[key];
+    if (stored !== undefined) store.settings = stored;
+    store[sigKey("x")] = cacheOf("2026-10-28", "k", { ok: { ad: 0.9, suggested: null }, broken: "x" }, "not-an-array");
+    store[sigKey("linkedin")] = "junk";
+    store[budgetKey(today())] = { day: today(), count: "7" };
+    const doc = page();
+    await main(doc);
+    expect(collectForm(doc)).toStrictEqual(expected);
+    expect(input(doc, "provider-typesafe").checked).toBe(expected.provider === "typesafe");
+    expect(rowsOf(doc, "x").map((r) => cells(r))).toEqual([
+      ["ok", "0.90", "-"],
+      ["broken", "-", "-"]
+    ]);
+    expect(rowsOf(doc, "linkedin").length).toBe(0);
+    expect($<HTMLElement>(doc, "budget").dataset.used).toBe("0");
+  }
+});
+
+test("main(): today's budget count and each site's cache are read from storage under the landed keys", async () => {
+  const day = today();
+  store.settings = { provider: "typesafe" };
+  store[budgetKey(day)] = { day, count: 12, minute: 0, minuteCount: 3 };
+  store[budgetKey("2000-01-01")] = { day: "2000-01-01", count: 299, minute: 0, minuteCount: 0 };
+  store[sigKey("youtube")] = cacheOf(day, "typesafe:jev-latest:1", { yt: { ad: 0.8, suggested: 0.2 } });
+  store[sigKey("instagram")] = cacheOf(day, "openai:gpt-6-luna:1", { ig: { ad: null, suggested: 0.75 } });
+  const doc = page();
+  await main(doc);
+  expect($<HTMLElement>(doc, "budget").dataset.used).toBe("12");
+  expect($<HTMLElement>(doc, "diag-youtube").dataset.stale).toBe("false");
+  expect($<HTMLElement>(doc, "diag-instagram").dataset.stale).toBe("true");
+  expect(cells(rowsOf(doc, "youtube")[0])).toEqual(["yt", "0.80", "0.20"]);
+  expect(cells(rowsOf(doc, "instagram")[0])).toEqual(["ig", "-", "0.75"]);
+});
+
+test("submitting the form saves the collected Settings under 'settings' and re-renders", async () => {
+  store.settings = { provider: "openai" };
+  const doc = page();
+  await main(doc);
+  populateForm(FULL, doc);
+  input(doc, "openai-model").value = "";
+
+  const state = await nextState(doc, () => {
+    $<HTMLFormElement>(doc, "settings").dispatchEvent(new Event("submit", { cancelable: true }));
+  });
+  expect(state).toBe("saved");
+  expect(store.settings).toStrictEqual({ ...FULL, openai: { ...FULL.openai, model: DEFAULT_SETTINGS.openai.model } });
+  expect(input(doc, "openai-model").value).toBe(DEFAULT_SETTINGS.openai.model);
+  expect(sent).toEqual([]);
+  expect($<HTMLElement>(doc, "diag-youtube").dataset.stale).toBe("false");
+});
+
+test("the cache button sends { type: 'reset' } and re-renders the diagnostics afterwards", async () => {
+  const day = today();
+  store[sigKey("x")] = cacheOf(day, "openai:gpt-6-luna:1", { a: { ad: 1, suggested: 1 } });
+  sendMessage = async (msg) => {
+    sent.push(msg);
+    for (const site of SITES) delete store[sigKey(site)];
+    return undefined;
+  };
+  const doc = page();
+  await main(doc);
+  expect(rowsOf(doc, "x").length).toBe(1);
+
+  const state = await nextState(doc, () => $<HTMLButtonElement>(doc, "reset").click());
+  expect(state).toBe("reset");
+  expect(sent).toEqual([{ type: "reset" }]);
+  expect(rowsOf(doc, "x").length).toBe(0);
+  expect(store.settings).toBeUndefined();
+});
+
+test("a failed reset message surfaces as an error state instead of an unhandled rejection", async () => {
+  sendMessage = async () => {
+    throw new Error("no background");
+  };
+  const doc = page();
+  await main(doc);
+  const state = await nextState(doc, () => $<HTMLButtonElement>(doc, "reset").click());
+  expect(state).toBe("error");
+  expect($<HTMLElement>(doc, "status").textContent).toContain("no background");
+});
