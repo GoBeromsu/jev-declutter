@@ -1,43 +1,57 @@
-export type SiteId = "youtube" | "x" | "instagram";
+export type SiteId = "youtube" | "x" | "instagram" | "linkedin";
 
 export type Action = "keep" | "blur" | "hide";
 
-/** A page component Jev is asked about. `selector` is what the CSS will target. */
-export interface Candidate {
-  selector: string;
-  description: string;
-  /** Short visible text from the page, when the component is present. */
-  sample?: string;
-  source: "seed" | "discovered";
-}
+export type Category = "ad" | "suggested" | "module";
 
-export interface Decision {
-  selector: string;
-  description: string;
-  action: Action;
-  distracting: number;
-  essential: number;
-}
-
-/** One day's frozen result for one site. The CSS never changes until `day` rolls over. */
-export interface SiteCache {
-  day: string;
-  site: SiteId;
-  model: string;
-  decisions: Decision[];
-  css: string;
-}
+export type ProviderId = "openai" | "typesafe";
 
 export interface Settings {
-  apiKey: string;
-  model: string;
-  goals: Record<SiteId, string>;
+  provider: ProviderId;
+  openai: { apiKey: string; model: string };
+  typesafe: { apiKey: string; model: string };
+  sites: Record<SiteId, { enabled: boolean }>;
+  actions: Record<Category, Action>;
 }
 
-export type Message =
-  | { type: "snapshot"; site: SiteId; candidates: Candidate[] }
-  | { type: "reset" };
+/** Structure and UI-chrome labels only: no post text ever enters this shape. */
+export interface ItemDescriptor {
+  n: number;
+  key: string;
+  signature: string;
+  chrome_text: string[];
+  has_follow_button: boolean;
+  has_external_link: boolean;
+  ad_attribute: boolean;
+  media: "video" | "image" | "none";
+  path_kind: string;
+}
 
-export type RefreshResult =
-  | { ok: true; status: "fresh" | "refreshed"; cache: SiteCache }
-  | { ok: false; error: string };
+/** null = refused or missing answer: keep that item. */
+export interface ItemScores {
+  ad: number | null;
+  suggested: number | null;
+}
+
+export interface DecisionProvider {
+  id: ProviderId;
+  classify(
+    site: SiteId,
+    items: ItemDescriptor[],
+    key: string,
+    model: string,
+    fetchImpl?: typeof fetch
+  ): Promise<{ model: string; scores: ItemScores[] }>;
+}
+
+export type Message = { type: "classify"; site: SiteId; items: ItemDescriptor[] } | { type: "reset" };
+
+export type ClassifyResult = { ok: true; scores: ItemScores[] } | { ok: false; error: string };
+
+export type SignatureVerdict = { ad: number | null; suggested: number | null };
+
+export interface SignatureCache {
+  day: string;
+  providerKey: string;
+  entries: Record<string, SignatureVerdict>;
+}

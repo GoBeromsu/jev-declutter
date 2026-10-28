@@ -1,31 +1,44 @@
-import type { Action, Decision } from "./types";
+import type { Action, Category } from "./types";
 
 // Rules live in code, not in the prompt: change a threshold here and only rendering reruns.
-export const ESSENTIAL_AT = 0.5;
 export const HIDE_AT = 0.8;
 export const BLUR_AT = 0.5;
 
-export function decide(distracting: number, essential: number): Action {
-  if (essential >= ESSENTIAL_AT) return "keep";
-  if (distracting >= HIDE_AT) return "hide";
-  if (distracting >= BLUR_AT) return "blur";
-  return "keep";
+export function actionFor(category: Category, p: number | null, actions: Record<Category, Action>): Action {
+  if (p === null || !(p >= BLUR_AT)) return "keep";
+  const want = actions[category];
+  if (want === "keep") return "keep";
+  if (p >= HIDE_AT) return want;
+  return "blur";
 }
 
-const RULES: Record<Exclude<Action, "keep">, string> = {
-  hide: "display: none !important;",
-  blur: "filter: blur(14px) grayscale(1) !important; opacity: 0.5 !important; pointer-events: none !important;"
-};
+const RANK: Record<Action, number> = { keep: 0, blur: 1, hide: 2 };
 
-/** Same decisions in, byte-identical CSS out: sorted and free of timestamps. */
-export function renderCss(decisions: Decision[]): string {
-  return decisions
-    .filter((d) => d.action !== "keep")
-    .map((d) => ({ selector: d.selector, action: d.action as Exclude<Action, "keep"> }))
-    .sort((a, b) => a.selector.localeCompare(b.selector))
-    .map((d) => `${d.selector} { ${RULES[d.action]} }`)
-    .join("\n");
+export function combine(a: Action, b: Action): Action {
+  return RANK[a] >= RANK[b] ? a : b;
 }
+
+export interface Placement {
+  pageHasPainted: boolean;
+  top: number;
+  viewportHeight: number;
+}
+
+/**
+ * A hide only applies where nothing on screen moves: below the viewport, or before
+ * the first paint. In view or above (after paint) it degrades to blur. A NaN top is
+ * never trusted to be off-screen, so it also degrades to blur.
+ */
+export function placement(want: Action, pos: Placement): Action {
+  if (want !== "hide") return want;
+  if (Number.isNaN(pos.top)) return "blur";
+  if (pos.top >= Math.max(0, pos.viewportHeight)) return "hide";
+  return pos.pageHasPainted ? "blur" : "hide";
+}
+
+export const ITEM_CSS =
+  '[data-jev="hide"]{display:none!important}' +
+  '[data-jev="blur"]{filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}';
 
 /** Local calendar day, so the cache rolls over at the user's midnight. */
 export function today(now: Date = new Date()): string {
