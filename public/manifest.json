@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Jev Declutter",
+  "version": "0.1.0",
+  "description": "Once a day, Jev decides which Instagram, X, and YouTube components to hide or blur; the decision is cached and rendered as fixed CSS.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://api.typesafe.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://x.com/*",
+        "https://twitter.com/*",
+        "https://www.instagram.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Jev Declutter settings"
+  }
+}

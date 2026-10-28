@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>Jev Declutter</title>
+  <style>
+    body { font: 14px/1.5 system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #222; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input, textarea { width: 100%; box-sizing: border-box; font: inherit; padding: 0.4rem; }
+    textarea { min-height: 3.5rem; }
+    button { margin: 1rem 0.5rem 0 0; padding: 0.4rem 0.9rem; font: inherit; }
+    table { border-collapse: collapse; width: 100%; margin-top: 0.5rem; font-size: 12px; }
+    th, td { border: 1px solid #ddd; padding: 0.25rem 0.4rem; text-align: left; vertical-align: top; }
+    code { font-size: 11px; }
+    #status { color: #555; margin-left: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>Jev Declutter</h1>
+  <p>Once a day, the first visit to each site sends its components to Jev. The result is frozen as CSS until midnight.</p>
+
+  <label for="apiKey">TypeSafe API key</label>
+  <input id="apiKey" type="password" autocomplete="off" />
+  <label for="model">Model</label>
+  <input id="model" />
+  <label for="goal-youtube">YouTube goal</label>
+  <textarea id="goal-youtube"></textarea>
+  <label for="goal-x">X goal</label>
+  <textarea id="goal-x"></textarea>
+  <label for="goal-instagram">Instagram goal</label>
+  <textarea id="goal-instagram"></textarea>
+
+  <button id="save">Save</button>
+  <button id="reset">Clear today's cache</button>
+  <span id="status"></span>
+
+  <h2>Today's decisions</h2>
+  <div id="decisions"></div>
+  <script src="options.js"></script>
+</body>
+</html>
