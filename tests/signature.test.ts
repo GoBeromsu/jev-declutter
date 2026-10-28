@@ -1,11 +1,16 @@
 import { expect, test } from "bun:test";
-import { fnv1a, signalKey, signature, token } from "../src/signature";
+import { Window } from "happy-dom";
+import { fnv1a, signalKey, signature } from "../src/signature";
 import type { ItemDescriptor } from "../src/types";
 
 const el = (html: string): Element => {
   const host = document.createElement("div");
   host.innerHTML = html;
   return host.firstElementChild as Element;
+};
+
+const navigateTo = (url: string): void => {
+  (globalThis as unknown as { location: Location }).location = new Window({ url }).location as unknown as Location;
 };
 
 const article = (tweet: string, cls = ""): Element =>
@@ -77,27 +82,50 @@ test("role, aria-label presence, external link, video and img are tokens", () =>
   expect(signature(el(`<div><a href="https://example.com/x">hi</a></div>`), "x")).not.toBe(
     signature(el(`<div><a href="/inbox">hi</a></div>`), "x")
   );
-  expect(token(el(`<a href="https://example.com/x"></a>`), "x.com")).toBe("a[ext]");
-  expect(token(el(`<a href="https://x.com/u/a"></a>`), "x.com")).toBe("a");
-  expect(token(el(`<a href="https://x.com/u/a"></a>`), "")).toBe("a[ext]");
+  // The registered test DOM is not navigated, so location.host is "" and every absolute http link is external.
+  expect(signature(el(`<div><a href="https://x.com/u/a"></a></div>`), "x")).toBe(
+    signature(el(`<div><a href="https://example.com/x"></a></div>`), "x")
+  );
 });
 
 test("[ext] uses the raw href attribute: protocol-relative and relative links are never external", () => {
-  expect(token(el(`<a href="//elsewhere.example/ad"></a>`), "x.com")).toBe("a");
-  expect(token(el(`<a href="/inbox"></a>`), "x.com")).toBe("a");
-  expect(token(el(`<a href="https://x.com/ad"></a>`), "x.com")).toBe("a");
-  expect(token(el(`<a href="https://elsewhere.example/ad"></a>`), "x.com")).toBe("a[ext]");
-  expect(token(el(`<a href="http://elsewhere.example/ad"></a>`), "x.com")).toBe("a[ext]");
-  expect(token(el(`<a></a>`), "x.com")).toBe("a");
-  expect(signature(el(`<div><a href="//elsewhere.example/ad"></a></div>`), "x")).toBe(
-    signature(el(`<div><a href="/inbox"></a></div>`), "x")
-  );
-  expect(signature(el(`<div><a href="https://elsewhere.example/ad"></a></div>`), "x")).not.toBe(
-    signature(el(`<div><a href="/inbox"></a></div>`), "x")
-  );
-  expect(signature(el(`<a href="//elsewhere.example/ad"></a>`), "x")).toBe(`x:${fnv1a("a")}`);
-  expect(signature(el(`<div><video></video></div>`), "youtube")).not.toBe(signature(el(`<div></div>`), "youtube"));
-  expect(signature(el(`<div><img></div>`), "youtube")).not.toBe(signature(el(`<div></div>`), "youtube"));
+  navigateTo("https://x.com/home");
+  const onPage = (href: string): string => {
+    const div = document.createElement("div");
+    div.innerHTML = `<a href="${href}"></a>`;
+    return signature(div.firstElementChild as Element, "x");
+  };
+  const same = onPage("/inbox");
+  expect(onPage("//elsewhere.example/ad")).toBe(same);
+  expect(onPage("https://x.com/ad")).toBe(same);
+  expect(onPage("https://elsewhere.example/ad")).not.toBe(same);
+  expect(onPage("http://elsewhere.example/ad")).not.toBe(same);
+  expect(onPage("")).toBe(same);
+});
+
+test("signature() reads location.host: a navigated page tells same-host from cross-host absolute links", () => {
+  navigateTo("https://x.com/home");
+  expect(location.host).toBe("x.com");
+  const hashOf = (href: string): string => {
+    const div = document.createElement("div");
+    div.innerHTML = `<div><a href="${href}"></a></div>`;
+    return signature(div.firstElementChild as Element, "x");
+  };
+  const sameHost = hashOf("https://x.com/home");
+  expect(sameHost).toBe(`x:${fnv1a("div>a")}`);
+  expect(hashOf("//elsewhere.example/ad")).toBe(sameHost);
+  expect(hashOf("/inbox")).toBe(sameHost);
+  expect(hashOf("https://elsewhere.example/ad")).toBe(`x:${fnv1a("div>a[ext]")}`);
+  expect(hashOf("https://x.com/home")).not.toBe(hashOf("https://elsewhere.example/ad"));
+});
+
+test("an unparsable href gets no [ext] and does not throw", () => {
+  navigateTo("https://x.com/home");
+  for (const href of ["httpfoo", "http://", "https://", "http://[::1", "http:"]) {
+    const div = document.createElement("div");
+    div.innerHTML = `<div><a href="${href}" aria-label="x"></a></div>`;
+    expect(signature(div.firstElementChild as Element, "x")).toBe(`x:${fnv1a("div>a[a]")}`);
+  }
 });
 
 test("class names and ids never enter the signature", () => {

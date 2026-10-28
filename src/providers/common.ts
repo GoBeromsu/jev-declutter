@@ -1,3 +1,5 @@
+import type { ItemDescriptor } from "../types";
+
 export const QUESTION_VERSION = 1;
 
 export const RUBRIC =
@@ -29,6 +31,20 @@ export function questionsFor(count: number): Question[] {
     });
   }
   return out;
+}
+
+export function toWireItem(d: ItemDescriptor): ItemDescriptor {
+  return {
+    n: d.n,
+    key: d.key,
+    signature: d.signature,
+    chrome_text: [...d.chrome_text],
+    has_follow_button: d.has_follow_button,
+    has_external_link: d.has_external_link,
+    ad_attribute: d.ad_attribute,
+    media: d.media,
+    path_kind: d.path_kind
+  };
 }
 
 export class ProviderError extends Error {

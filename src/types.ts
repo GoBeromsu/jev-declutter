@@ -54,4 +54,5 @@ export interface SignatureCache {
   day: string;
   providerKey: string;
   entries: Record<string, SignatureVerdict>;
+  order: string[];
 }

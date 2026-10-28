@@ -9,7 +9,7 @@ export function fnv1a(s: string): string {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-export function token(el: Element, here: string): string {
+function token(el: Element, here: string): string {
   let t = el.tagName.toLowerCase();
   const role = el.getAttribute("role");
   if (role) t += `[r=${role}]`;
@@ -19,11 +19,14 @@ export function token(el: Element, here: string): string {
   if (el.tagName === "A") {
     const href = el.getAttribute("href");
     if (href !== null && href.startsWith("http")) {
+      let linkHost: string;
       try {
-        if (new URL(href).host !== here) t += "[ext]";
-      } catch {
-        void 0;
+        linkHost = new URL(href).host;
+      } catch (error) {
+        if (!(error instanceof TypeError)) throw error;
+        linkHost = here;
       }
+      if (linkHost !== here) t += "[ext]";
     }
   }
   if (el.tagName === "VIDEO") t += "[v]";
