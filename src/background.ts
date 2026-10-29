@@ -1,4 +1,4 @@
-import { consumeBudget, ensureCurrent, loadSigCache, providerKey, remember, saveSigCache } from "./cache";
+import { consumeBudget, ensureCurrent, loadSigCache, MAX_ITEMS, providerKey, remember, saveSigCache } from "./cache";
 import { today } from "./decide";
 import { providerFor } from "./providers/index";
 import { ProviderError } from "./providers/common";
@@ -15,7 +15,7 @@ import type {
   SiteId
 } from "./types";
 
-export const MAX_ITEMS = 20;
+export { MAX_ITEMS };
 export const PAUSE_MS = 60_000;
 export const PAUSE_KEY = "pauseUntil";
 

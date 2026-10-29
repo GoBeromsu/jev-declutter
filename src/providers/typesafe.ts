@@ -1,5 +1,5 @@
 import type { DecisionProvider } from "../types";
-import { ProviderError, RUBRIC, questionsFor, toWireItem } from "./common";
+import { ProviderError, RUBRIC, asProbability, questionsFor, toWireItem } from "./common";
 
 const ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 
@@ -56,6 +56,5 @@ async function readJson(res: Response): Promise<SystemOneResponse> {
 function noul(body: SystemOneResponse, name: string): number | null {
   const answer = body.answers?.[name];
   if (!answer || typeof answer !== "object" || answer.type !== "noul") return null;
-  const value = answer.noul;
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return asProbability(answer.noul);
 }

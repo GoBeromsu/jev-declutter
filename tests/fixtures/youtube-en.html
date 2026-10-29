@@ -32,7 +32,7 @@ ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-reel-sh
 <ytd-rich-item-renderer data-qa-expect="hide" data-qa-id="init-12" data-qa-kind="adAttr" data-qa-channel="initial" style="min-height:340px"><ytd-ad-slot-renderer><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 12 about gardening BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 12 BODY_SENTINEL</div></ytd-ad-slot-renderer></ytd-rich-item-renderer>
 <ytd-video-renderer data-qa-expect="keep" data-qa-id="init-13" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 13 about bread baking BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 13 BODY_SENTINEL</div></ytd-video-renderer>
 <ytd-rich-section-renderer class="qa-late" data-qa-id="late-bottom" style="min-height:120px"><i class="box"></i></ytd-rich-section-renderer>
-<ytd-rich-item-renderer data-qa-expect="blur-or-hide" data-qa-id="init-14" data-qa-kind="unknown" data-qa-channel="initial" data-qa-model="suggested" style="min-height:300px"><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 14 about trail maps BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 14 BODY_SENTINEL</div></ytd-rich-item-renderer>
+<ytd-rich-item-renderer data-qa-expect="blur-or-hide" data-qa-id="init-14" data-qa-kind="unknown" data-qa-channel="initial" data-qa-model="suggested" style="min-height:300px"><span role="note"></span><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 14 about trail maps BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 14 BODY_SENTINEL</div></ytd-rich-item-renderer>
 <ytd-video-renderer data-qa-expect="keep" data-qa-id="init-15" data-qa-kind="bodyNeg" data-qa-channel="initial" style="min-height:300px"><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">추천 광고 Sponsored are only words inside this body text BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 15 BODY_SENTINEL</div></ytd-video-renderer>
 <ytd-rich-item-renderer data-qa-expect="hide" data-qa-id="init-16" data-qa-kind="suggestedLabel" data-qa-channel="initial" style="min-height:300px"><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 16 about pottery BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><ytd-badge-supported-renderer><span>Suggested</span></ytd-badge-supported-renderer><div id="description-text">Short note 16 BODY_SENTINEL</div></ytd-rich-item-renderer>
 <ytd-video-renderer data-qa-expect="keep" data-qa-id="init-17" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><a class="thumb" href="#"><i class="box"></i></a><h3><a id="video-title" href="#">Sample post 17 about birdwatching BODY_SENTINEL</a></h3><div id="metadata-line"><span>1.2K views</span></div><div id="description-text">Short note 17 BODY_SENTINEL</div></ytd-video-renderer>
@@ -66,6 +66,7 @@ function heightOf(kind) {
 function build(kind, n, id, channel, y) {
   kind = remap(kind);
   var r = render(kind, n);
+  if (kind === 'unknown') r.inner = '<span role="note"></span>' + r.inner;
   var h = heightOf(kind);
   var attrs = (r.attrs || '') + ' data-qa-expect="' + expectOf(kind) + '" data-qa-id="' + id + '" data-qa-kind="' + kind + '" data-qa-channel="' + channel + '"';
   if (kind === 'unknown') attrs += ' data-qa-model="suggested"';
@@ -197,7 +198,7 @@ fx.batch = function () {
 function recycleInto(c, kind, channel) {
   kind = remap(kind);
   var n = seq++;
-  c.innerHTML = render(kind, n).inner;
+  c.innerHTML = (kind === 'unknown' ? '<span role="note"></span>' : '') + render(kind, n).inner;
   c.setAttribute('data-qa-expect', expectOf(kind));
   c.setAttribute('data-qa-id', 'rec-' + n);
   c.setAttribute('data-qa-kind', kind);

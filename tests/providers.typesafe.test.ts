@@ -223,6 +223,27 @@ describe("typesafe provider answer mapping", () => {
     expect(res.scores).toEqual([{ ad: null, suggested: null }]);
   });
 
+  test("an out-of-range noul is null for that score while the valid sibling survives", async () => {
+    for (const noul of [5, -0.2, 1.0000001]) {
+      const { fetchImpl } = fakeFetch(answers({ i0_ad: { type: "noul", noul }, i0_suggested: { type: "noul", noul: 0.9 } }));
+      const res = await typesafeProvider.classify("x", [item(0)], KEY, "jev-latest", fetchImpl);
+      expect(res.scores).toEqual([{ ad: null, suggested: 0.9 }]);
+    }
+  });
+
+  test("an out-of-range noul in a raw body is null and the sibling survives", async () => {
+    const raw = '{"answers":{"i0_ad":{"type":"noul","noul":5},"i0_suggested":{"type":"noul","noul":0.9}}}';
+    const { fetchImpl } = fakeFetch(raw);
+    const res = await typesafeProvider.classify("x", [item(0)], KEY, "jev-latest", fetchImpl);
+    expect(res.scores).toEqual([{ ad: null, suggested: 0.9 }]);
+  });
+
+  test("boundary noul values 0 and 1 are kept", async () => {
+    const { fetchImpl } = fakeFetch(answers({ i0_ad: { type: "noul", noul: 0 }, i0_suggested: { type: "noul", noul: 1 } }));
+    const res = await typesafeProvider.classify("x", [item(0)], KEY, "jev-latest", fetchImpl);
+    expect(res.scores).toEqual([{ ad: 0, suggested: 1 }]);
+  });
+
   test("every answer missing yields all-null scores, not an error", async () => {
     const { fetchImpl } = fakeFetch(answers({}));
     const res = await typesafeProvider.classify("x", [item(0)], KEY, "jev-latest", fetchImpl);

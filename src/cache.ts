@@ -5,6 +5,7 @@ import type { Settings, SignatureCache, SignatureVerdict, SiteId } from "./types
 
 export const DAILY_REQUEST_BUDGET = 300;
 export const PER_MINUTE_CAP = 30;
+export const MAX_ITEMS = 20;
 
 const DEFAULT_CAP = 2000;
 const MINUTE_MS = 60_000;

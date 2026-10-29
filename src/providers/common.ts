@@ -11,6 +11,11 @@ export const RUBRIC =
   "rather than showing it from one the user follows." +
   "Judge from the structural fields only; when the evidence is weak, answer with a low probability.";
 
+/** A provider score is trusted only as a finite probability in [0, 1]; anything else is missing (null = keep). */
+export function asProbability(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}
+
 export interface Question {
   name: string;
   instructions: string;

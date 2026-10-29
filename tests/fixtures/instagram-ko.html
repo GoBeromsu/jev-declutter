@@ -30,7 +30,7 @@ ytd-rich-item-renderer,ytd-video-renderer,ytd-compact-video-renderer,ytd-reel-sh
 <article data-qa-expect="keep" data-qa-id="init-11" data-qa-kind="adSentence" data-qa-channel="initial" style="min-height:300px"><header><a role="link" href="#"><span>user_11</span></a></header><i class="box"></i><ul><li>이 긴 문장 안에 Ad 라는 단어가 들어 있습니다 BODY_SENTINEL</li></ul></article>
 <article data-qa-expect="hide" data-qa-id="init-12" data-qa-kind="adLabel" data-qa-channel="initial" style="min-height:340px"><header><a role="link" href="#"><span>user_12</span></a><div><span>광고</span></div></header><i class="box"></i><ul><li>예시 글 12: 정원 가꾸기 이야기 BODY_SENTINEL</li></ul></article>
 <article data-qa-expect="keep" data-qa-id="init-13" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><header><a role="link" href="#"><span>user_13</span></a></header><i class="box"></i><ul><li>예시 글 13: 빵 굽기 이야기 BODY_SENTINEL</li></ul></article>
-<article data-qa-expect="blur-or-hide" data-qa-id="init-14" data-qa-kind="unknown" data-qa-channel="initial" data-qa-model="suggested" style="min-height:300px"><header><a role="link" href="#"><span>user_14</span></a></header><i class="box"></i><ul><li>예시 글 14: 등산 지도 이야기 BODY_SENTINEL</li></ul></article>
+<article data-qa-expect="blur-or-hide" data-qa-id="init-14" data-qa-kind="unknown" data-qa-channel="initial" data-qa-model="suggested" style="min-height:300px"><span role="note"></span><header><a role="link" href="#"><span>user_14</span></a></header><i class="box"></i><ul><li>예시 글 14: 등산 지도 이야기 BODY_SENTINEL</li></ul></article>
 <article data-qa-expect="keep" data-qa-id="init-15" data-qa-kind="bodyNeg" data-qa-channel="initial" style="min-height:300px"><header><a role="link" href="#"><span>user_15</span></a></header><i class="box"></i><ul><li>추천 광고 Sponsored 라는 단어가 본문 안에 들어 있습니다 BODY_SENTINEL</li></ul></article>
 <article data-qa-expect="hide" data-qa-id="init-16" data-qa-kind="suggestedFollow" data-qa-channel="initial" style="min-height:300px"><header><a role="link" href="#"><span>user_16</span></a><button type="button">팔로우</button></header><i class="box"></i><ul><li>예시 글 16: 도자기 이야기 BODY_SENTINEL</li></ul></article>
 <article data-qa-expect="keep" data-qa-id="init-17" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><header><a role="link" href="#"><span>user_17</span></a></header><i class="box"></i><ul><li>예시 글 17: 새 관찰 이야기 BODY_SENTINEL</li></ul></article>
@@ -64,6 +64,7 @@ function heightOf(kind) {
 function build(kind, n, id, channel, y) {
   kind = remap(kind);
   var r = render(kind, n);
+  if (kind === 'unknown') r.inner = '<span role="note"></span>' + r.inner;
   var h = heightOf(kind);
   var attrs = (r.attrs || '') + ' data-qa-expect="' + expectOf(kind) + '" data-qa-id="' + id + '" data-qa-kind="' + kind + '" data-qa-channel="' + channel + '"';
   if (kind === 'unknown') attrs += ' data-qa-model="suggested"';
@@ -189,7 +190,7 @@ fx.batch = function () {
 function recycleInto(c, kind, channel) {
   kind = remap(kind);
   var n = seq++;
-  c.innerHTML = render(kind, n).inner;
+  c.innerHTML = (kind === 'unknown' ? '<span role="note"></span>' : '') + render(kind, n).inner;
   c.setAttribute('data-qa-expect', expectOf(kind));
   c.setAttribute('data-qa-id', 'rec-' + n);
   c.setAttribute('data-qa-kind', kind);

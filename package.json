@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "bun run scripts/build.ts",
+    "qa": "bun run build && bun run scripts/qa/run.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:staged": "tsc --noEmit -p tsconfig.staged.json",
     "test": "bun test"

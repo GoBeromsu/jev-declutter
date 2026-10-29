@@ -1,5 +1,5 @@
 import type { DecisionProvider, ItemScores } from "../types";
-import { ProviderError, RUBRIC, questionsFor, toWireItem } from "./common";
+import { ProviderError, RUBRIC, asProbability, questionsFor, toWireItem } from "./common";
 
 const ENDPOINT = "https://api.openai.com/v1/decisions";
 
@@ -7,8 +7,7 @@ function probabilityOf(answer: unknown): number | null {
   if (typeof answer !== "object" || answer === null) return null;
   const a = answer as { type?: unknown; probability?: unknown };
   if (a.type !== "predicate") return null;
-  const p = a.probability;
-  return typeof p === "number" && Number.isFinite(p) && p >= 0 && p <= 1 ? p : null;
+  return asProbability(a.probability);
 }
 
 export const openaiProvider: DecisionProvider = {
