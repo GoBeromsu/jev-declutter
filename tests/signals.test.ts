@@ -18,8 +18,36 @@ const FILES: { file: string; site: SiteId }[] = [
   { file: "instagram-en.html", site: "instagram" },
   { file: "instagram-ko.html", site: "instagram" },
   { file: "linkedin-en.html", site: "linkedin" },
-  { file: "linkedin-ko.html", site: "linkedin" }
+  { file: "linkedin-ko.html", site: "linkedin" },
+  { file: "linkedin-react-en.html", site: "linkedin" },
+  { file: "linkedin-react-ko.html", site: "linkedin" }
 ];
+
+/** ko/en twins that must produce the same verdict sequence, by fixture prefix. */
+const PAIRS: { site: SiteId; prefix: string }[] = [
+  { site: "youtube", prefix: "youtube" },
+  { site: "x", prefix: "x" },
+  { site: "instagram", prefix: "instagram" },
+  { site: "linkedin", prefix: "linkedin" },
+  { site: "linkedin", prefix: "linkedin-react" }
+];
+
+/**
+ * Per-FILE, not per-site: LinkedIn's React markup carries no structural ad attribute and no
+ * legacy actor follow slot, so its only follow-slot hit is the body-nested negative control.
+ */
+const PINNED: Record<string, { ads: number; follows: number }> = {
+  "youtube-en.html": { ads: 2, follows: 0 },
+  "youtube-ko.html": { ads: 2, follows: 0 },
+  "x-en.html": { ads: 2, follows: 2 },
+  "x-ko.html": { ads: 2, follows: 2 },
+  "instagram-en.html": { ads: 0, follows: 1 },
+  "instagram-ko.html": { ads: 0, follows: 1 },
+  "linkedin-en.html": { ads: 2, follows: 1 },
+  "linkedin-ko.html": { ads: 2, follows: 1 },
+  "linkedin-react-en.html": { ads: 0, follows: 1 },
+  "linkedin-react-ko.html": { ads: 0, follows: 1 }
+};
 
 const load = (file: string): Document =>
   new DOMParser().parseFromString(readFileSync(join(DIR, file), "utf8"), "text/html");
@@ -45,13 +73,7 @@ describe("signals over site fixtures", () => {
       test("pinned selector match counts", () => {
         const ads = cfg.adSelectors.length ? doc.querySelectorAll(cfg.adSelectors.join(",")).length : 0;
         const follows = cfg.followSlot ? doc.querySelectorAll(cfg.followSlot).length : 0;
-        const expected = {
-          youtube: { ads: 2, follows: 0 },
-          x: { ads: 2, follows: 2 },
-          instagram: { ads: 0, follows: 1 },
-          linkedin: { ads: 2, follows: 1 }
-        }[site];
-        expect({ ads, follows }).toEqual(expected);
+        expect({ ads, follows }).toEqual(PINNED[file]!);
       });
 
       test("hide items get a verdict; keep and unknown items get null", () => {
@@ -115,11 +137,11 @@ describe("signals over site fixtures", () => {
   });
 
   test("ko and en fixtures give identical verdict sequences", () => {
-    for (const site of ["youtube", "x", "instagram", "linkedin"] as SiteId[]) {
+    for (const { site, prefix } of PAIRS) {
       const cfg = SITES[site];
       const run = (f: string) =>
         [...load(f).querySelectorAll(cfg.item)].map((el) => deterministic(extractSignals(el, cfg), cfg)?.category ?? null);
-      expect(run(`${site}-ko.html`)).toEqual(run(`${site}-en.html`));
+      expect(run(`${prefix}-ko.html`)).toEqual(run(`${prefix}-en.html`));
     }
   });
 });
@@ -216,14 +238,72 @@ describe("follow slot honours bodyExclude", () => {
 });
 
 describe("body-leak canary control", () => {
-  test("with the bodyExclude filter bypassed, X chromeText DOES contain the sentinel", () => {
-    const broken: SiteConfig = { ...SITES.x, bodyExclude: ":not(*)" };
-    for (const file of ["x-en.html", "x-ko.html"]) {
-      const items = [...load(file).querySelectorAll(SITES.x.item)];
+  const control = (site: SiteId, files: string[]): void => {
+    const cfg = SITES[site];
+    const broken: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
+    for (const file of files) {
+      const items = [...load(file).querySelectorAll(cfg.item)];
+      expect(items.length).toBeGreaterThan(0);
       const leaking = items.filter((el) => extractSignals(el, broken).chromeText.some((s) => s.includes(SENTINEL)));
       expect(leaking.length).toBeGreaterThan(0);
-      const clean = items.filter((el) => extractSignals(el, SITES.x).chromeText.some((s) => s.includes(SENTINEL)));
+      const clean = items.filter((el) => extractSignals(el, cfg).chromeText.some((s) => s.includes(SENTINEL)));
       expect(clean.length).toBe(0);
+    }
+  };
+
+  test("with the bodyExclude filter bypassed, X chromeText DOES contain the sentinel", () => {
+    control("x", ["x-en.html", "x-ko.html"]);
+  });
+
+  test("with the bodyExclude filter bypassed, the LinkedIn React follow-in-body negative is marked", () => {
+    // The React label slots cannot reach the commentary paragraph, so bodyExclude no longer
+    // guards chromeText there - it guards the FOLLOW slot: the negative item's `button.follow`
+    // sits inside the body span, and only bodyExclude keeps it from turning an organic post into
+    // a suggested one. Bypassing the filter must therefore produce exactly that false mark.
+    const cfg = SITES.linkedin;
+    const broken: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
+    for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
+      const el = load(file).querySelector('[data-qa-kind="bodyFollow"]')!;
+      expect(el.getAttribute("data-qa-expect")).toBe("keep");
+      expect(extractSignals(el, broken).followButton).toBe(true);
+      expect(deterministic(extractSignals(el, broken), broken)).toEqual({ category: "suggested", p: 1 });
+      expect(extractSignals(el, cfg).followButton).toBe(false);
+      expect(deterministic(extractSignals(el, cfg), cfg)).toBeNull();
+    }
+  });
+
+  test("post text stays out of descriptors even when the body testid is renamed", () => {
+    // Defence in depth. bodyExclude's expandable-text-box entry must not be the ONLY guard: the
+    // React label slots must never reach the commentary paragraph in the first place. Strip the
+    // body testid - a rename LinkedIn can ship any day - and no descriptor field may carry body
+    // text. This fails with a general-sibling (`h2 ~ p[componentkey]`) slot, which admits the
+    // paragraph wrapping the body span, and passes with the adjacent-sibling (`h2 + ...`) form.
+    const cfg = SITES.linkedin;
+    for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
+      const html = readFileSync(join(DIR, file), "utf8").replaceAll(' data-testid="expandable-text-box"', "");
+      expect(html).not.toContain("expandable-text-box");
+      const doc = new DOMParser().parseFromString(html, "text/html");
+      const items = [...doc.querySelectorAll(cfg.item)];
+      expect(items.length).toBeGreaterThanOrEqual(18);
+      expect(doc.body.innerHTML).toContain(SENTINEL);
+      const leaks: string[] = [];
+      items.forEach((el, i) => {
+        const d = toDescriptor(i, el, cfg, extractSignals(el, cfg));
+        for (const s of allStrings(d)) if (s.includes(SENTINEL)) leaks.push(`${file}[${i}]: ${s}`);
+      });
+      expect(leaks).toEqual([]);
+    }
+  });
+
+  test("dropping [componentkey] from the React actor slot leaks the author headline", () => {
+    // The keyless sibling paragraph of the React actor sub-description is the author headline
+    // (author bio, up to 197 chars live). bodyExclude cannot reach it, so the slot qualifier is
+    // the only thing keeping it out of a request: widening the slot must leak the sentinel.
+    const widened: SiteConfig = { ...SITES.linkedin, labelSlots: `${SITES.linkedin.labelSlots}, h2 + div p` };
+    for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
+      const items = [...load(file).querySelectorAll(SITES.linkedin.item)];
+      const leaking = items.filter((el) => extractSignals(el, widened).chromeText.some((s) => s.includes(SENTINEL)));
+      expect(leaking.length).toBeGreaterThan(0);
     }
   });
 });

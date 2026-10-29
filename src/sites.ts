@@ -3,6 +3,10 @@ import type { SiteId } from "./types";
 // Per-site knowledge. Selectors are 2026 evidence from uBlock uAssets/EasyList and maintained
 // extensions (irbis-sh/filter-lists no-doomscroll, news-feed-eradicator, linkedin-feed-cleaner).
 // The sites change markup without notice: verify with the fixtures in tests/fixtures.
+// LinkedIn additionally ships a React/SDUI feed (role="listitem" cards, hashed class names, no
+// .update-components-* slots) to some accounts; its selectors sit alongside the legacy ones and
+// are structure-only evidence from the 2026-10-29 live probe recorded in
+// .omo/evidence/task-18-aside-feed-declutter.txt (fixtures: tests/fixtures/linkedin-react-*.html).
 
 export interface SiteModule {
   selector: string;
@@ -98,18 +102,40 @@ export const SITES: Record<SiteId, SiteConfig> = {
     id: "linkedin",
     hosts: ["www.linkedin.com"],
     item: 'div.feed-shared-update-v2, div[data-testid="mainFeed"] div[role="listitem"]',
+    // React markup adds no ad selector: the live probe found 0 elements whose attribute name or
+    // value contains "sponsor"/"promot" anywhere in the feed, so React ads are label-only.
     adSelectors: [
       '[componentkey*="urn:li:sponsoredContentV2"]',
       "[data-sponsored-tracking-url]",
       '[data-is-sponsored="true"]',
       "article[data-is-sponsored]"
     ],
+    // The last two selectors cover LinkedIn's 2026 React feed (see the header note). `h2 + div
+    // p[componentkey]` is the actor sub-description inside the block following the post's hidden
+    // a11y heading; it holds "Promoted" / "프로모션". `h2 + p[componentkey]` is the update-level
+    // chrome paragraph (the position the legacy `.update-components-header__text-view` header
+    // occupied).
+    // Both qualifiers are load-bearing, not decoration:
+    //  - `[componentkey]`: the keyless sibling paragraph is the author headline (live max 197
+    //    chars of author bio, which must never reach a request), while all live markers sit in
+    //    keyed paragraphs of at most 43 chars.
+    //  - `+` and not `~`: the post commentary is a LATER keyed `p` sibling of the same heading, so
+    //    the general-sibling form would admit the body wrapper as a label slot (live 9 of 9 of its
+    //    extra matches wrapped the body span) and leave bodyExclude's expandable-text-box entry as
+    //    the only thing keeping post text out of chrome_text. Adjacent-sibling keeps every hide
+    //    verdict and opens one slot instead of nineteen. Pinned by the testid-removal test in
+    //    tests/signals.test.ts.
     labelSlots:
-      ".update-components-actor__sub-description, .update-components-actor__description, .update-components-header__text-view, .update-components-header",
+      ".update-components-actor__sub-description, .update-components-actor__description, .update-components-header__text-view, .update-components-header, h2 + div p[componentkey], h2 + p[componentkey]",
     bodyExclude:
-      ".update-components-text, .feed-shared-inline-show-more-text, .update-components-article, .feed-shared-update-v2__description",
+      ".update-components-text, .feed-shared-inline-show-more-text, .update-components-article, .feed-shared-update-v2__description, span[data-testid=\"expandable-text-box\"]",
+    // No React-markup follow slot: on the live React feed 4 of 26 ORGANIC items (reposts by a
+    // connection, company pages) carry a Follow button, so with followMeansSuggested a React
+    // follow slot would hide organic posts. React suggested items are detected by label only.
     followSlot: ".update-components-actor button, button.follow",
     followMeansSuggested: true,
+    // React markup adds no module: the live probe found no recommendation rail at all (the only
+    // asides were an empty sidebar and the ad column), so nothing structural to target yet.
     modules: [
       { selector: 'aside[aria-label="LinkedIn News"]', description: "LinkedIn News panel" },
       { selector: "#feed-news-module", description: "LinkedIn News module in the feed sidebar" },

@@ -430,6 +430,58 @@ test("nested parser records register each pending item once before the first flu
   expect(first.dataset.jev).toBe("hide"); expect(second.dataset.jev).toBe("hide");
 });
 
+/** Restored by the shared afterEach, so a failing expectation cannot leak the stub. */
+function captureWarnings() {
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args); };
+  cleanups.push(() => { console.warn = original; });
+  return warnings;
+}
+
+test("repeated no-key answers warn exactly once per page load", async () => {
+  // Given
+  const h = harness(); await h.ready(); h.response(async () => ({ ok: false, error: "no-key" }));
+  const warnings = captureWarnings();
+  // When: two separate batches each come back without a saved provider key.
+  const first = item("2h"); h.mutate(document.body, [first]); h.flush(); await h.send();
+  const second = item("3h"); h.mutate(document.body, [second]); h.flush(); await h.send();
+  // Then: one warning for the page, and both unknown items still fail open.
+  expect(h.calls).toHaveLength(2);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]?.slice(0, 2)).toEqual(["[jev-declutter]", "no-key"]);
+  expect(first.hasAttribute("data-jev")).toBe(false);
+  expect(second.hasAttribute("data-jev")).toBe(false);
+});
+
+for (const error of ["http-429", "network"]) {
+  test(`${error} answers never emit the no-key warning`, async () => {
+    // Given
+    const h = harness(); await h.ready(); h.response(async () => ({ ok: false, error }));
+    const warnings = captureWarnings();
+    // When
+    const el = item("2h"); h.mutate(document.body, [el]); h.flush(); await h.send();
+    // Then
+    expect(h.calls).toHaveLength(1);
+    expect(warnings).toHaveLength(0);
+    expect(el.hasAttribute("data-jev")).toBe(false);
+  });
+}
+
+test("no-key keeps deterministic hides while warning once", async () => {
+  // Given
+  const h = harness(); await h.ready(); h.response(async () => ({ ok: false, error: "no-key" }));
+  const warnings = captureWarnings();
+  // When: a deterministic ad and an unknown item are discovered together.
+  const ad = item("Sponsored"); const unknown = item("2h");
+  h.mutate(document.body, [ad, unknown]); h.flush(); await h.send();
+  // Then
+  expect(ad.dataset.jev).toBe("hide");
+  expect(unknown.hasAttribute("data-jev")).toBe(false);
+  expect(warnings).toHaveLength(1);
+  expect(warnings[0]?.slice(0, 2)).toEqual(["[jev-declutter]", "no-key"]);
+});
+
 test("DOMContentLoaded does not enqueue already processed initial items again", async () => {
   // Given
   const h = harness(); await h.ready(); const el = item();

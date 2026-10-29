@@ -82,6 +82,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   let frameId: number | undefined;
   let timerId: number | undefined;
   let pauseUntil = 0;
+  let warnedNoKey = false;
   let generation = 0;
   let n = 0;
   let processed = new WeakMap<Element, string>();
@@ -159,6 +160,12 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     for (const d of batch) inflight.delete(d.key);
     if (!result.ok) {
       if (result.error === "http-429" || result.error === "budget") pauseUntil = host.now() + 60_000;
+      // One diagnostic per page load: the missing key is a page-wide condition,
+      // not a per-item or per-batch one. Never echo any stored key material.
+      if (result.error === "no-key" && !warnedNoKey) {
+        warnedNoKey = true;
+        console.warn("[jev-declutter]", "no-key", "save a provider API key on the extension options page");
+      }
       for (const d of batch) answers.set(d.key, { ad: null, suggested: null });
       schedule();
       return;
