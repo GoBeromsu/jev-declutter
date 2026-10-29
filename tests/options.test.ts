@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { DAILY_REQUEST_BUDGET } from "../src/cache";
+import { DAILY_REQUEST_BUDGET, overCapKey } from "../src/cache";
 import { today } from "../src/decide";
 import { collectForm, main, populateForm, renderDiagnostics } from "../src/options";
 import { DEFAULT_TYPESAFE_MODEL } from "../src/providers/typesafe";
@@ -286,6 +286,40 @@ test("main(): partial, legacy and garbage stored settings populate the form from
     expect(rowsOf(doc, "linkedin").length).toBe(0);
     expect($<HTMLElement>(doc, "budget").dataset.used).toBe("0");
   }
+});
+
+test("over-cap signatures are marked on their own row and only while still cached", () => {
+  const doc = page();
+  const cache = cacheOf("2026-10-28", "k", { shared: { ad: 0.95, suggested: null }, other: { ad: 0.1, suggested: 0.1 } });
+  renderDiagnostics(
+    { day: "2026-10-28", currentKey: "k", caches: { x: cache }, budgetUsed: 0, overCap: { x: ["shared", "cleared"] } },
+    doc
+  );
+  const x = $<HTMLElement>(doc, "diag-x");
+  const rows = rowsOf(doc, "x");
+  // Only the signature that is both over cap and still cached counts.
+  expect(x.dataset.overCap).toBe("1");
+  expect(rows.map((r) => (r as HTMLElement).dataset.overCap)).toEqual(["true", undefined]);
+  expect(cells(rows[0])[0]).toContain("shared");
+  expect(x.textContent).toContain("그룹 상한");
+  // A site with no over-cap note renders exactly as before.
+  expect($<HTMLElement>(doc, "diag-youtube").dataset.overCap).toBe("0");
+  expect($<HTMLElement>(doc, "diag-youtube").textContent).not.toContain("그룹 상한");
+});
+
+test("main(): an over-cap record for today is read from storage and a stale one is ignored", async () => {
+  const day = today();
+  store[sigKey("x")] = cacheOf(day, "openai:gpt-6-luna:1", { poisoned: { ad: 0.95, suggested: null } });
+  store[overCapKey("x")] = { day, keys: ["poisoned"] };
+  store[sigKey("youtube")] = cacheOf(day, "openai:gpt-6-luna:1", { yesterday: { ad: 0.95, suggested: null } });
+  store[overCapKey("youtube")] = { day: "2000-01-01", keys: ["yesterday"] };
+  store[overCapKey("linkedin")] = "junk";
+  const doc = page();
+  await main(doc);
+  expect($<HTMLElement>(doc, "diag-x").dataset.overCap).toBe("1");
+  expect((rowsOf(doc, "x")[0] as HTMLElement).dataset.overCap).toBe("true");
+  expect($<HTMLElement>(doc, "diag-youtube").dataset.overCap).toBe("0");
+  expect($<HTMLElement>(doc, "diag-linkedin").dataset.overCap).toBe("0");
 });
 
 test("main(): today's budget count and each site's cache are read from storage under the landed keys", async () => {

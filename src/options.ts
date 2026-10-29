@@ -1,4 +1,4 @@
-import { DAILY_REQUEST_BUDGET, loadSigCache, providerKey } from "./cache";
+import { DAILY_REQUEST_BUDGET, loadOverCap, loadSigCache, providerKey } from "./cache";
 import { today } from "./decide";
 import { DEFAULT_TYPESAFE_MODEL } from "./providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, loadSettings } from "./storage";
@@ -21,6 +21,8 @@ export interface DiagnosticsView {
   currentKey: string;
   caches: Partial<Record<SiteId, unknown>>;
   budgetUsed: number;
+  /** signalKeys whose model verdict hit its page-view cap today (src/scan.ts), per site. */
+  overCap?: Partial<Record<SiteId, readonly string[]>>;
 }
 
 type Row = [key: string, ad: string, suggested: string];
@@ -100,7 +102,7 @@ function el<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, classN
   return node;
 }
 
-function tableOf(doc: Document, rows: Row[]): HTMLTableElement {
+function tableOf(doc: Document, rows: Row[], overCap: ReadonlySet<string>): HTMLTableElement {
   const table = el(doc, "table");
   const head = el(doc, "thead");
   const headRow = el(doc, "tr");
@@ -109,7 +111,12 @@ function tableOf(doc: Document, rows: Row[]): HTMLTableElement {
   const body = el(doc, "tbody");
   for (const [key, ad, suggested] of rows) {
     const tr = el(doc, "tr");
-    tr.append(el(doc, "td", "key", key), el(doc, "td", "num", ad), el(doc, "td", "num", suggested));
+    const keyCell = el(doc, "td", "key", key);
+    if (overCap.has(key)) {
+      tr.dataset.overCap = "true";
+      keyCell.append(el(doc, "span", "tag tag-stale", "그룹 상한"));
+    }
+    tr.append(keyCell, el(doc, "td", "num", ad), el(doc, "td", "num", suggested));
     body.append(tr);
   }
   table.append(head, body);
@@ -124,6 +131,8 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
   const day = cache && typeof cache.day === "string" ? cache.day : "";
   const key = cache && typeof cache.providerKey === "string" ? cache.providerKey : "";
   const stale = cache !== undefined && (day !== view.day || key !== view.currentKey);
+  // A reset clears the verdicts but not the over-cap note, so only keys still cached are shown.
+  const overCap = new Set((view.overCap?.[site] ?? []).filter((k) => Object.hasOwn(entries, k)));
 
   const block = el(doc, "section", "diag");
   block.id = `diag-${site}`;
@@ -131,12 +140,16 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
   block.dataset.providerKey = key;
   block.dataset.rows = String(rows.length);
   block.dataset.stale = String(stale);
+  block.dataset.overCap = String(overCap.size);
 
   const head = el(doc, "div", "diag-head");
   head.append(el(doc, "h3", "", SITE_LABELS[site]));
   if (!cache) head.append(el(doc, "span", "tag tag-none", "캐시 없음"));
   else if (stale) head.append(el(doc, "span", "tag tag-stale", "현재 설정과 다름"));
   else head.append(el(doc, "span", "tag tag-fresh", "오늘"));
+  if (overCap.size > 0) {
+    head.append(el(doc, "span", "tag tag-stale", `그룹 상한 초과 서명 ${overCap.size}개`));
+  }
   block.append(head);
 
   if (!cache) {
@@ -144,7 +157,12 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
     return block;
   }
   block.append(el(doc, "p", "meta", `day ${day || "?"} · providerKey ${key || "?"} · ${rows.length}개`));
-  block.append(rows.length === 0 ? el(doc, "p", "empty", "저장된 판정이 없습니다.") : tableOf(doc, rows));
+  if (overCap.size > 0) {
+    block.append(el(doc, "p", "meta",
+      "아래 '그룹 상한' 서명은 한 모델 판정이 한 페이지에서 상한을 넘는 항목에 걸렸습니다. " +
+      "상한을 넘은 항목은 건드리지 않았습니다. 잘못된 판정이면 오늘 캐시를 비우세요."));
+  }
+  block.append(rows.length === 0 ? el(doc, "p", "empty", "저장된 판정이 없습니다.") : tableOf(doc, rows, overCap));
   return block;
 }
 
@@ -167,9 +185,12 @@ export function renderDiagnostics(view: DiagnosticsView, root: ParentNode = docu
 export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsView> {
   const day = today();
   const caches: Partial<Record<SiteId, unknown>> = {};
+  const overCap: Partial<Record<SiteId, readonly string[]>> = {};
   const loaded = await Promise.all(SITE_IDS.map((site) => loadSigCache(site)));
+  const capped = await Promise.all(SITE_IDS.map((site) => loadOverCap(site, day)));
   SITE_IDS.forEach((site, i) => {
     caches[site] = loaded[i];
+    overCap[site] = capped[i];
   });
   const key = budgetKey(day);
   const budget = (await chrome.storage.local.get(key))[key] as unknown;
@@ -178,6 +199,7 @@ export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsVi
     day,
     currentKey: providerKey(settings),
     caches,
+    overCap,
     budgetUsed: typeof count === "number" && Number.isFinite(count) && count >= 0 ? count : 0
   };
 }

@@ -61,3 +61,25 @@ bun run qa           # fixture 스크롤 QA (headless Chrome): 시프트·플래
 
 - `src/sites.ts`의 selector는 2026년 마크업 증거(uBlock uAssets/EasyList, 유지되는 extension들)에 기반한다. 사이트가 바뀌면 `tests/fixtures/<site>-<lang>.html`로 재현하고 selector와 fixture를 함께 고친다.
 - 마커 단어와 임계값은 `src/markers.ts`, `src/decide.ts`에 있다. 설정 페이지에서 오늘의 판정 표와 예산 사용량을 볼 수 있고, 캐시를 비울 수 있다(설정 변경과 캐시 초기화는 다음 페이지 이동부터 적용).
+
+## 유지보수: LinkedIn React 마크업 드리프트 확인
+
+LinkedIn React 피드의 광고 판정은 label slot 하나(`h2 + div p[componentkey]`)에 걸려 있다. 이 selector가 깨지면 광고가 다시 보이기만 하고(fail open) 경고는 아무 데도 남지 않는다. 그 침묵을 깨는 명령이다:
+
+```bash
+bun run scripts/probe/linkedin.ts
+```
+
+Aside 브라우저에 자기 탭을 열어 `https://www.linkedin.com/feed/`를 스크롤하고, 세고, 숫자만 출력한 뒤 탭을 닫는다. 읽기 전용이다: 클릭·입력·저장·네트워크 요청이 없고, extension이 로드되어 있지 않아도 된다(`src/sites.ts`의 설정과 `extractSignals`를 페이지에서 그대로 다시 돌린다). 출력은 숫자와 불린뿐이고, **게시물 본문·이름·URL·식별자는 출력하거나 저장하지 않는다**.
+
+| 필드 | 뜻 |
+| --- | --- |
+| `itemsSeen` | item selector가 잡은 아이템 수 |
+| `adMarkerItems` / `adDetected` | 헤더에 `Sponsored`/`광고` 같은 마커가 **정확히** 일치하는 아이템 수 / 그중 현재 설정이 광고로 판정한 수 |
+| `suggestedMarkerItems` / `suggestedDetected` | `Suggested`/`추천` 마커 기준의 같은 쌍 (라이브에서 아직 0건이라 0 of 0이 정상) |
+| `organicFalseMarked` | 마커가 없는데 판정이 붙은 아이템 수 — 0이어야 한다 |
+| `maxChromeLen` | `chrome_text` 문자열의 최대 길이. 본문 유출 감지용 카나리아(상한 40) |
+
+`adDetected < adMarkerItems`면 label slot이 깨진 것이고, `organicFalseMarked > 0`이면 일반 글에 판정이 붙은 것이다. 둘 중 하나라도 걸리거나 아이템을 하나도 못 보면 종료 코드 1(`checks` 필드에 어느 쪽인지 나온다). 마커 기준은 `labelSlots`과 **독립적으로** 계산한다(본문 영역 밖 헤더의 짧은 텍스트 노드를 직접 훑는다). 그래서 slot이 사라지면 마커는 그대로 보이고 판정만 빠져 미검출로 드러난다 — 이 실패 제어는 `tests/probe.test.ts`가 고정한다.
+
+숫자가 어긋나면 `src/sites.ts`의 LinkedIn selector와 `tests/fixtures/linkedin-react-*.html`을 같이 고친다. 규칙과 한계(본문 아래로 옮겨간 마커, 구조 기반 광고 속성)는 `scripts/probe/linkedin-count.ts` 주석에 적혀 있다.

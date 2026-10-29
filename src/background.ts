@@ -1,4 +1,4 @@
-import { consumeBudget, ensureCurrent, loadSigCache, MAX_ITEMS, providerKey, remember, saveSigCache } from "./cache";
+import { consumeBudget, ensureCurrent, loadSigCache, MAX_ITEMS, OVER_CAP_PREFIX, providerKey, remember, saveSigCache } from "./cache";
 import { today } from "./decide";
 import { providerFor } from "./providers/index";
 import { ProviderError } from "./providers/common";
@@ -175,7 +175,11 @@ async function sigKeys(): Promise<string[]> {
 }
 
 export async function resetCaches(now: Date = new Date()): Promise<void> {
-  await chrome.storage.local.remove([...(await sigKeys()), budgetKey(today(now))]);
+  // An over-cap note names a cached signature, so clearing the cache must clear the note too -
+  // otherwise the options page keeps pointing at a verdict that no longer exists.
+  const stored = Object.keys(await chrome.storage.local.get(null));
+  const stale = stored.filter((k) => k.startsWith("sig:") || k.startsWith(OVER_CAP_PREFIX));
+  await chrome.storage.local.remove([...stale, budgetKey(today(now))]);
 }
 
 function activeModel(raw: unknown): string {

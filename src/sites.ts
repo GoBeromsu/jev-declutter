@@ -7,6 +7,8 @@ import type { SiteId } from "./types";
 // .update-components-* slots) to some accounts; its selectors sit alongside the legacy ones and
 // are structure-only evidence from the 2026-10-29 live probe recorded in
 // .omo/evidence/task-18-aside-feed-declutter.txt (fixtures: tests/fixtures/linkedin-react-*.html).
+// The LinkedIn right-rail ad selectors come from a second 2026-10-29 structure probe recorded in
+// .omo/evidence/task-25-aside-feed-declutter.txt.
 
 export interface SiteModule {
   selector: string;
@@ -125,6 +127,11 @@ export const SITES: Record<SiteId, SiteConfig> = {
     //    the only thing keeping post text out of chrome_text. Adjacent-sibling keeps every hide
     //    verdict and opens one slot instead of nineteen. Pinned by the testid-removal test in
     //    tests/signals.test.ts.
+    // The live keyed actor paragraph also WRAPS the member's `/in/` profile anchor: 12 of 30 and
+    // 10 of 31 live slots in two measured sessions, anchor text up to 37 chars, reaching
+    // chrome_text verbatim every time. A `:not(:has(a))` qualifier would discard the whole slot
+    // and lose any marker sharing it, so the name is dropped at the TEXT READ instead: `slotText`
+    // in src/signals.ts skips nested `a[href]` subtrees for every site.
     labelSlots:
       ".update-components-actor__sub-description, .update-components-actor__description, .update-components-header__text-view, .update-components-header, h2 + div p[componentkey], h2 + p[componentkey]",
     bodyExclude:
@@ -134,14 +141,32 @@ export const SITES: Record<SiteId, SiteConfig> = {
     // follow slot would hide organic posts. React suggested items are detected by label only.
     followSlot: ".update-components-actor button, button.follow",
     followMeansSuggested: true,
-    // React markup adds no module: the live probe found no recommendation rail at all (the only
-    // asides were an empty sidebar and the ad column), so nothing structural to target yet.
+    // React markup adds no recommendation module: the todo 18 live probe found no recommendation
+    // rail at all (the only asides were an empty sidebar and the ad column).
+    // The last two selectors cover that ad column - LinkedIn's right-rail ad placement, F3
+    // finding L1. A 2026-10-29 read-only structure probe of the live rail found the placement
+    // rendered as a 300x250 cross-origin iframe carrying the SDUI slot key
+    // `componentkey="MainFeedDesktopNav_feed_ad"`, inside a wrapper div whose only attribute is a
+    // hashed-class list (`ajr*` build output), under a rail `aside` with no stable hook either.
+    // The slot key is the one non-hashed handle on the placement: over 12 live loads it was the
+    // single componentkey value containing "ad", `[componentkey$="_feed_ad"]` matched exactly one
+    // element per load, and it never appeared on a feed item, the profile card, the news rail
+    // widget or the games rail widget (`feedRightNavGamesComponentRef`). `$=` and not `*=`, so a
+    // future `feed_adjacent`-style slot name cannot match.
+    //  - the `:has(> iframe ...)` entry hides the CONTAINER rather than the frame alone, and the
+    //    direct-child combinator keeps it on the tight wrapper instead of the rail column.
+    //  - the `:not(iframe)` entry covers the DOM "Promoted" card variant F3 recorded in the same
+    //    slot. That variant did not reproduce in 12 live loads on 2026-10-29, so it is covered
+    //    structurally - same slot key, any tag - and never by a guessed label or class.
+    // The frame's contents are cross-origin and are never read: only the container is treated.
     modules: [
       { selector: 'aside[aria-label="LinkedIn News"]', description: "LinkedIn News panel" },
       { selector: "#feed-news-module", description: "LinkedIn News module in the feed sidebar" },
       { selector: ".feed-shared-news-module", description: "LinkedIn News module" },
       { selector: ".feed-follows-module", description: "Follow suggestions module" },
-      { selector: "section:has(.games-entrypoints-module__subheader)", description: "Games entry-point module" }
+      { selector: "section:has(.games-entrypoints-module__subheader)", description: "Games entry-point module" },
+      { selector: 'div:has(> iframe[componentkey$="_feed_ad"])', description: "Right-rail ad placement: the container wrapping the cross-origin ad iframe" },
+      { selector: '[componentkey$="_feed_ad"]:not(iframe)', description: "Right-rail ad placement rendered as a DOM card instead of an iframe" }
     ],
     excludedPaths: [/^\/messaging/],
     feedPaths: [/^\/feed/]

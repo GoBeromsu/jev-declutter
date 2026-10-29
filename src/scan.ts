@@ -1,4 +1,4 @@
-import { ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, providerKey, remember } from "./cache";
+import { ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
 import { actionFor, combine, ITEM_CSS, placement, today } from "./decide";
 import { deterministic } from "./rules";
 import { extractSignals, toDescriptor } from "./signals";
@@ -32,6 +32,8 @@ export interface ScanHost {
   postTask(callback: () => void): void;
   timer(callback: () => Promise<void>): number;
   cancelTimer(id: number): void;
+  /** Diagnostics only: signalKeys whose model group hit its cap in this page view. */
+  overCap(keys: readonly string[]): void;
 }
 
 function browserHost(cfg: SiteConfig): ScanHost {
@@ -59,7 +61,9 @@ function browserHost(cfg: SiteConfig): ScanHost {
       channel.port2.postMessage(null);
     },
     timer: (callback) => window.setTimeout(() => { void callback(); }, 120),
-    cancelTimer: (id) => window.clearTimeout(id)
+    cancelTimer: (id) => window.clearTimeout(id),
+    // A diagnostics hint must never break the scan: storage failure is simply no hint.
+    overCap: (keys) => { void recordOverCap(cfg.id, keys).catch(() => undefined); }
   };
 }
 
@@ -91,14 +95,57 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   const queue = new Map<string, ItemDescriptor>();
   const inflight = new Set<string>();
   const answers = new Map<string, { ad: number | null; suggested: number | null }>();
+  // Per page view: which DISTINCT elements each model verdict currently holds treated, which keys
+  // ran out of budget, and how many distinct feed items this page view has shown the scanner.
+  const charges = new Map<string, Set<Element>>();
+  // The key each element was charged under: a held-then-recycled cell shows another key by the
+  // time it is dropped, and the slot to free is the one that paid for what is on screen.
+  let chargedUnder = new WeakMap<Element, string>();
+  const overCapped = new Set<string>();
+  let reportedOverCap = 0;
+  let observedItems = 0;
+  let observedSeen = new WeakSet<Element>();
   const priority = new Set<Element>();
   const modules = cfg.modules.map((m) => m.selector).join(",");
   const selector = [cfg.item, modules].filter(Boolean).join(",");
-  const qa = { callbackDurations: [] as number[], processed: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
+  const qa = { callbackDurations: [] as number[], processed: 0, observedItems: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
   const excluded = () => cfg.excludedPaths.some((re) => re.test(location.pathname));
   const active = () => !stopped && !excluded() && settings.sites[cfg.id].enabled;
   const scoreAction = (s: { ad: number | null; suggested: number | null }) =>
     combine(actionFor("ad", s.ad, settings.actions), actionFor("suggested", s.suggested, settings.actions));
+
+  const charged = (key: string, el: Element) => chargedUnder.get(el) === key;
+
+  /** One slot per element, so taking a new one always frees the old. */
+  function charge(key: string, el: Element) {
+    uncharge(el);
+    const members = charges.get(key) ?? new Set<Element>();
+    members.add(el);
+    charges.set(key, members);
+    chargedUnder.set(el, key);
+  }
+
+  /** Only a treatment that is genuinely gone frees its slot; a held item keeps it (D6). */
+  function uncharge(el: Element) {
+    const key = chargedUnder.get(el);
+    if (key === undefined) return;
+    chargedUnder.delete(el);
+    const members = charges.get(key);
+    if (members?.delete(el) && members.size === 0) charges.delete(key);
+  }
+
+  /**
+   * A slot may only be held by a live treatment. A removal is not always announced - a fully cached
+   * page view sends no batch, so nothing sweeps - therefore detached members are pruned here, at
+   * the one decision point that spends the budget. A key under its budget costs one size read.
+   */
+  function liveCharges(key: string, budget: number): number {
+    const members = charges.get(key);
+    if (!members) return 0;
+    if (members.size < budget) return members.size;
+    for (const member of members) if (!member.isConnected) uncharge(member);
+    return charges.get(key)?.size ?? 0;
+  }
 
   function observe(el: Element) {
     pending.add(el);
@@ -126,6 +173,8 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     path = location.pathname;
     generation++;
     queue.clear(); inflight.clear(); answers.clear(); pending.clear(); applyRO.disconnect(); nearIO.disconnect();
+    charges.clear(); chargedUnder = new WeakMap(); overCapped.clear(); reportedOverCap = 0;
+    observedItems = 0; observedSeen = new WeakSet(); qa.observedItems = 0;
     processed = new WeakMap();
     states.clear();
     if (!excluded()) for (const el of document.querySelectorAll("[data-jev-held]")) el.removeAttribute("data-jev-held");
@@ -142,8 +191,8 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   async function send() {
     timerId = undefined;
     if (!active() || host.now() < pauseUntil) return;
-    for (const [el] of states) {
-      if (!el.isConnected) { states.delete(el); nearIO.unobserve(el); priority.delete(el); }
+    for (const [el, state] of states) {
+      if (!el.isConnected) { uncharge(el); states.delete(el); nearIO.unobserve(el); priority.delete(el); }
     }
     const liveKeys = new Set([...states.values()].map((state) => state.key));
     for (const key of queue.keys()) if (!liveKeys.has(key)) queue.delete(key);
@@ -194,29 +243,59 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   function flush(applyPath: "ro" | "mutation") {
     if (!active()) return;
     cache = ensureCurrent(cache, today(), providerKey(settings));
-    const writes: { el: Element; want: Action; top: number; reveal: boolean }[] = [];
+    const writes: { el: Element; want: Action; top: number; reveal: boolean; key: string; charge?: string }[] = [];
     const painted = pageHasPainted();
+    // Slots claimed earlier in THIS flush, so items of one key cannot all read the same count.
+    const claimed = new Map<string, number>();
     for (const el of pending) {
       applyRO.unobserve(el);
-      if (!el.isConnected) { pending.delete(el); states.delete(el); nearIO.unobserve(el); priority.delete(el); continue; }
+      if (!el.isConnected) {
+        uncharge(el);
+        pending.delete(el); states.delete(el); nearIO.unobserve(el); priority.delete(el); continue;
+      }
       const isModule = modules !== "" && el.matches(modules);
       let state = states.get(el);
       let key: string;
       let descriptor: ItemDescriptor | undefined;
       let want: Action | undefined;
+      let chargeKey: string | undefined;
       if (isModule) {
         key = "module"; want = settings.actions.module;
       } else {
         const signals = extractSignals(el, cfg);
         descriptor = toDescriptor(n++, el, cfg, signals);
         key = descriptor.key;
+        // The cap's denominator: distinct feed items this page view has shown us, modules excluded.
+        if (!observedSeen.has(el)) { observedSeen.add(el); qa.observedItems = ++observedItems; }
         const local = deterministic(signals, cfg);
         if (local) want = actionFor(local.category, local.p, settings.actions);
         else if (!cacheReady) continue;
         else {
           const scores = lookup(cache, key) ?? answers.get(key);
-          if (scores) want = scoreAction(scores);
-          else if (signals.chromeText.length === 0 && !signals.followButton && !signals.hasExternalLink && signals.media === "none") want = "keep";
+          if (scores) {
+            want = scoreAction(scores);
+            // One model answer is a single judgement about a skeleton, not evidence about each
+            // item wearing it. While it already holds a quarter of this page view's items treated,
+            // the group size is itself evidence of the site's common organic card: fail open
+            // (IS-8) and leave every further item untouched. An item this verdict already holds
+            // treated keeps its treatment and its slot, so nothing on screen is ever withdrawn.
+            if (want !== "keep" && !charged(key, el)) {
+              const budget = modelGroupCap(observedItems) - (claimed.get(key) ?? 0);
+              if (liveCharges(key, budget) >= budget) {
+                want = "keep";
+                overCapped.add(key);
+              } else {
+                chargeKey = key;
+                claimed.set(key, (claimed.get(key) ?? 0) + 1);
+              }
+            }
+          }
+          // Nothing to judge - no chrome, no follow button, no outbound link, no media - so the
+          // model would be paid for an empty descriptor. `withheldSlots === 0` is load-bearing: a
+          // slot the privacy rule silenced (its text was an author name) leaves chromeText empty
+          // while the card DOES have chrome, and such an item must still be asked about, as a
+          // structure-only descriptor (todo 27 gate finding F1).
+          else if (signals.chromeText.length === 0 && signals.withheldSlots === 0 && !signals.followButton && !signals.hasExternalLink && signals.media === "none") want = "keep";
         }
       }
       const recycled = state !== undefined && state.key !== key;
@@ -232,12 +311,16 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       }
       const desired = want ?? "keep";
       const reveal = el.getAttribute("data-jev") === "hide" && (recycled || desired !== "hide");
-      writes.push({ el, want: desired, reveal, top: reveal && painted ? revealTop(el) : el.getBoundingClientRect().top });
+      writes.push({ el, want: desired, reveal, key, charge: chargeKey,
+        top: reveal && painted ? revealTop(el) : el.getBoundingClientRect().top });
     }
     // Complete every geometry read before the first attribute write.
-    for (const { el, want, top, reveal } of writes) {
+    for (const { el, want, top, reveal, key, charge: chargeKey } of writes) {
       if (el.hasAttribute("data-jev-held") || (reveal && painted && top < innerHeight)) {
-        el.setAttribute("data-jev-held", ""); continue;
+        el.setAttribute("data-jev-held", "");
+        // The previous verdict is still the one on screen, so it keeps its slot - and because a
+        // claim is only committed below, the verdict that was not applied takes none.
+        continue;
       }
       // Placement may blur a visible item, never reveal one already collapsed.
       let action = el.getAttribute("data-jev") === "hide" && want === "hide"
@@ -246,7 +329,16 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       if (el.getAttribute("data-jev") === "blur" && action === "hide") action = "blur";
       if (action === "keep") el.removeAttribute("data-jev");
       else el.setAttribute("data-jev", action);
+      // The charge follows the treatment that is now on screen: this verdict takes the slot, or a
+      // verdict whose treatment just went away (revealed, recycled, re-keyed) gives one back.
+      if (chargeKey !== undefined) charge(chargeKey, el);
+      else if (action === "keep" || !charged(key, el)) uncharge(el);
       qa.applyPaths.set(el, applyPath);
+    }
+    // One report per newly over-cap key, so the options page can name the signature to reset.
+    if (overCapped.size > reportedOverCap) {
+      reportedOverCap = overCapped.size;
+      host.overCap([...overCapped]);
     }
     schedule();
   }

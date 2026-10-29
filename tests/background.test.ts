@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
-import { consumeBudget } from "../src/cache";
+import { consumeBudget, overCapKey } from "../src/cache";
 import { today } from "../src/decide";
 import { ProviderError } from "../src/providers/common";
 import { DEFAULT_SETTINGS, budgetKey, sigKey } from "../src/storage";
@@ -588,6 +588,20 @@ test("resetCaches removes every sig:* key and the injected day's budget key only
   store.settings = { provider: "openai" };
   await bg.resetCaches(NOW);
   expect(Object.keys(store).sort()).toEqual([budgetKey("2000-01-01"), "settings"]);
+});
+
+test("resetCaches also removes every overcap:* key, whatever day it carries", async () => {
+  // Given: a cached verdict, today's over-cap note for it and a stale one from another day.
+  store[sigKey("x")] = { a: 1 };
+  store[overCapKey("x")] = { day: today(NOW), keys: ["1fd217c7"] };
+  store[overCapKey("youtube")] = { day: "2000-01-01", keys: ["stale"] };
+  store[budgetKey(today(NOW))] = { count: 3 };
+  store.settings = { provider: "openai" };
+  // When
+  await bg.resetCaches(NOW);
+  // Then: the note cannot outlive the cache entry it names, so it cannot come back
+  // when the same skeleton is cached again later the same day.
+  expect(Object.keys(store).sort()).toEqual(["settings"]);
 });
 
 test("the reset message answers ok and clears sig:* keys", async () => {

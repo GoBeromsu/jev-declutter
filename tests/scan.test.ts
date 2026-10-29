@@ -1,8 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { startScanner, type ScanHost, type Mutation } from "../src/scan";
-import { SITES } from "../src/sites";
+import { deterministic } from "../src/rules";
+import { SITES, type SiteConfig } from "../src/sites";
 import { DEFAULT_SETTINGS } from "../src/storage";
-import { freshCache, MAX_ITEMS, providerKey } from "../src/cache";
+import { freshCache, MAX_ITEMS, MIN_MODEL_GROUP, modelGroupCap, providerKey } from "../src/cache";
 import { today } from "../src/decide";
 import { extractSignals, toDescriptor } from "../src/signals";
 import type { ClassifyResult, Message, Settings, SignatureCache } from "../src/types";
@@ -25,6 +28,7 @@ function harness(cfg = SITES.x) {
   const settings = deferred<Settings>();
   const cache = deferred<SignatureCache | undefined>();
   const calls: Message[] = [];
+  const overCapped: string[][] = [];
   const targets = new Set<Element>();
   const observations: Element[] = [];
   let mutation: (records: readonly Mutation[]) => void = () => {};
@@ -35,25 +39,26 @@ function harness(cfg = SITES.x) {
   let timer: (() => void) | undefined;
   let painted = false;
   let now = 0;
-  let response: () => Promise<ClassifyResult> = async () => ({ ok: true, scores: [{ ad: 0, suggested: 0.9 }] });
+  let response: (message: Message) => Promise<ClassifyResult> = async () => ({ ok: true, scores: [{ ad: 0, suggested: 0.9 }] });
   const host: ScanHost = {
     settings: () => settings.promise, cache: () => cache.promise,
-    send: async (msg) => { calls.push(msg); return response(); },
+    send: async (msg) => { calls.push(msg); return response(msg); },
     painted: () => painted, now: () => now,
     mutations: (cb) => { mutation = cb; return () => {}; },
     resize: (cb) => { resize = cb; return { observe: (el) => { targets.add(el); observations.push(el); }, unobserve: (el) => { targets.delete(el); }, disconnect: () => targets.clear() }; },
     intersection: (cb) => { near = cb; return { observe: () => {}, unobserve: () => {}, disconnect: () => {} }; },
     frame: (cb) => { frame = cb; return 1; }, cancelFrame: () => { frame = undefined; },
     postTask: (cb) => { task = cb; },
-    timer: (cb) => { timer = cb; return 1; }, cancelTimer: () => { timer = undefined; }
+    timer: (cb) => { timer = cb; return 1; }, cancelTimer: () => { timer = undefined; },
+    overCap: (keys) => { overCapped.push([...keys]); }
   };
   const scanner = startScanner(cfg, host);
   cleanups.push(scanner.stop);
   return {
-    settings, cache, calls, targets, observations, scanner,
+    settings, cache, calls, overCapped, targets, observations, scanner,
     painted: () => { painted = true; },
     time: (value: number) => { now = value; },
-    response: (fn: () => Promise<ClassifyResult>) => { response = fn; },
+    response: (fn: (message: Message) => Promise<ClassifyResult>) => { response = fn; },
     mutate: (target: Node, addedNodes: Node[] = []) => mutation([{ target, addedNodes }]),
     mutations: (records: readonly Mutation[]) => mutation(records),
     flush: () => resize(),
@@ -191,6 +196,92 @@ test("removed item and item without signals fail open without stale writes", asy
   h.mutate(document.body); h.flush(); await h.send();
   expect(h.calls).toHaveLength(0); expect(el.hasAttribute("data-jev")).toBe(false);
 });
+
+/**
+ * The "no signals at all -> keep without asking" branch must read ABSENT chrome, not WITHHELD
+ * chrome. `src/signals.ts` withholds a label slot's text when the slot sits inside a link, because
+ * that text is an author name; the slot still exists and the item is still undecided, so it has to
+ * reach the model. Reading the two as the same thing took Instagram's model path to zero (todo 27
+ * gate finding F1): 13 of 19 items per fixture, including the one the fixture's own ground truth
+ * says must end up blurred or hidden.
+ */
+test("a withheld label slot still reaches the model, with no name on the wire", async () => {
+  const h = harness(); await h.ready();
+  const el = document.createElement("div");
+  el.dataset.testid = "cellInnerDiv";
+  el.innerHTML = '<a href="#/member1" role="link"><div data-testid="socialContext">Member One Display Name</div></a>';
+  Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top: 2000, bottom: 2100, width: 100, height: 100 }) });
+  document.body.append(el);
+  const signals = extractSignals(el, SITES.x);
+  expect(signals.chromeText).toEqual([]);
+  expect(signals.withheldSlots).toBe(1);
+  expect(deterministic(signals, SITES.x)).toBeNull();
+  h.mutate(document.body, [el]); h.flush(); await h.send();
+  expect(h.calls).toHaveLength(1);
+  const message = h.calls[0];
+  if (message?.type !== "classify") throw new Error("expected a classify message");
+  expect(message.items).toHaveLength(1);
+  expect(message.items[0]?.chrome_text).toEqual([]);
+  expect(JSON.stringify(message.items)).not.toContain("Member");
+  expect(Object.keys(message.items[0] ?? {})).not.toContain("withheldSlots");
+  h.flush();
+  expect(el.dataset.jev).toBe("hide");
+});
+
+test("an item whose chrome is genuinely absent is still kept locally without a request", async () => {
+  const h = harness(); await h.ready();
+  const el = item("", 2000);
+  expect(extractSignals(el, SITES.x).withheldSlots).toBe(0);
+  h.mutate(document.body, [el]); h.flush(); await h.send();
+  expect(h.calls).toHaveLength(0);
+  expect(el.hasAttribute("data-jev")).toBe(false);
+});
+
+/** Real fixture items in the harness DOM, with the rect stub `item()` uses. */
+function fixtureItems(file: string, cfg: SiteConfig, top = 2000): Element[] {
+  const doc = new DOMParser().parseFromString(readFileSync(join(import.meta.dir, "fixtures", file), "utf8"), "text/html");
+  const out: Element[] = [];
+  for (const source of doc.querySelectorAll(cfg.item)) {
+    const el = document.importNode(source, true);
+    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top, bottom: top + 100, width: 100, height: 100 }) });
+    document.body.append(el);
+    out.push(el);
+  }
+  return out;
+}
+
+for (const file of ["instagram-en.html", "instagram-ko.html"]) {
+  test(`${file}: every undecided item reaches the model, deduped to its distinct keys`, async () => {
+    const cfg = SITES.instagram;
+    const h = harness(cfg); await h.ready();
+    const items = fixtureItems(file, cfg);
+    expect(items).toHaveLength(19);
+    const undecided = items.filter((el) => deterministic(extractSignals(el, cfg), cfg) === null);
+    expect(undecided).toHaveLength(13);
+    const keyOfItem = (el: Element): string => toDescriptor(0, el, cfg, extractSignals(el, cfg)).key;
+    const keys = new Set(undecided.map(keyOfItem));
+    // The measured cost of asking: 2 requests for this page view, not 13. Withholding the per-item
+    // account name is what collapses the 12 organic cards onto one key.
+    expect(keys.size).toBe(2);
+    const modelItem = undecided.find((el) => el.hasAttribute("data-qa-model"));
+    if (!modelItem) throw new Error("fixture lost its data-qa-model item");
+    expect(modelItem.getAttribute("data-qa-expect")).toBe("blur-or-hide");
+    const modelKey = keyOfItem(modelItem);
+    h.response(async (message) =>
+      message.type === "classify"
+        ? { ok: true, scores: message.items.map((i) => (i.key === modelKey ? { ad: null, suggested: 0.9 } : { ad: 0.1, suggested: 0.1 })) }
+        : { ok: true, scores: [] });
+    h.mutate(document.body, items); h.flush(); await h.send(); h.flush();
+    const sent = h.calls.flatMap((c) => (c.type === "classify" ? c.items.map((i) => i.key) : []));
+    expect(new Set(sent)).toEqual(keys);
+    expect(modelItem.getAttribute("data-jev")).toBe("hide");
+    expect(undecided.filter((el) => el !== modelItem && el.hasAttribute("data-jev"))).toEqual([]);
+    for (const c of h.calls) {
+      if (c.type !== "classify") continue;
+      expect(c.items.every((i) => i.chrome_text.length === 0)).toBe(true);
+    }
+  });
+}
 
 test("rAF re-registers each frame and repeated visibility interruptions restart it", () => {
   const h = harness(); h.frame(); expect(h.hasFrame()).toBe(true); h.task();
@@ -480,6 +571,336 @@ test("no-key keeps deterministic hides while warning once", async () => {
   expect(unknown.hasAttribute("data-jev")).toBe(false);
   expect(warnings).toHaveLength(1);
   expect(warnings[0]?.slice(0, 2)).toEqual(["[jev-declutter]", "no-key"]);
+});
+
+/** Same label, same skeleton: every element below shares one signalKey, as organic cards do. */
+const group = (size: number, label: string) => Array.from({ length: size }, () => item(label, 2000));
+const treated = (els: readonly Element[]) => els.filter((el) => el.hasAttribute("data-jev"));
+const keyOf = (el: Element) => toDescriptor(0, el, SITES.x, extractSignals(el, SITES.x)).key;
+
+/** One false-positive verdict for `key`, every other key organic. */
+const poison = (key: string) => async (message: Message): Promise<ClassifyResult> => ({
+  ok: true,
+  scores: message.type === "classify"
+    ? message.items.map((d) => ({ ad: d.key === key ? 0.95 : 0, suggested: null }))
+    : []
+});
+
+/** Every skeleton on the page judged an ad, whatever its signalKey. */
+const poisonAll = async (message: Message): Promise<ClassifyResult> => ({
+  ok: true,
+  scores: message.type === "classify" ? message.items.map(() => ({ ad: 0.95, suggested: null })) : []
+});
+
+const cachedVerdict = (key: string, ad: number) => {
+  const c = freshCache(today(), providerKey(DEFAULT_SETTINGS));
+  c.entries[key] = { ad, suggested: null }; c.order.push(key);
+  return c;
+};
+
+test("one model answer keeps at most cap items of a shared key treated", async () => {
+  // Given: a feed where far more items than the cap share one organic skeleton.
+  const h = harness(); await h.ready();
+  const els = group(100, "2h");
+  h.response(poison(keyOf(els[0] as Element)));
+  // When: a single false-positive verdict comes back for that one key.
+  h.mutate(document.body, els); h.flush();
+  await h.send(); h.flush();
+  // Then: a quarter of the page is the bound, so 75% of the feed survives.
+  const cap = modelGroupCap(els.length);
+  expect(cap).toBe(25);
+  expect(h.calls).toHaveLength(1);
+  expect(treated(els)).toHaveLength(cap);
+  expect(treated(els)).toEqual(els.slice(0, cap));
+  expect(els.slice(cap).some((el) => el.hasAttribute("data-jev-held"))).toBe(false);
+  // And: the signature is recorded once, so the options page can name it for reset.
+  expect(h.overCapped.at(-1)).toEqual([keyOf(els[0] as Element)]);
+});
+
+test("deterministic verdicts on the same page are neither counted nor capped", async () => {
+  // Given: a capped model group and a larger deterministic group on one page.
+  const h = harness(); await h.ready();
+  const unknown = group(60, "2h");
+  const ads = group(60, "Sponsored");
+  h.response(poison(keyOf(unknown[0] as Element)));
+  // When
+  h.mutate(document.body, [...unknown, ...ads]); h.flush();
+  await h.send(); h.flush();
+  // Then: per-item evidence stays unbounded while the shared verdict is bounded.
+  expect(treated(ads)).toHaveLength(60);
+  expect(ads.every((el) => el.dataset.jev === "hide")).toBe(true);
+  // 120 items observed -> cap 30, and deterministic items are part of the denominator only.
+  expect(treated(unknown)).toHaveLength(modelGroupCap(120));
+  expect(h.overCapped.flat()).toEqual([keyOf(unknown[0] as Element)]);
+});
+
+test("a cache hit obeys the same cap without any request", async () => {
+  // Given: yesterday's poisoned verdict for the skeleton most items share.
+  const h = harness();
+  const els = group(100, "2h");
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(keyOf(els[0] as Element), 0.95));
+  // When
+  h.mutate(document.body, els); h.flush(); await h.send();
+  // Then
+  expect(h.calls).toHaveLength(0);
+  expect(treated(els)).toHaveLength(modelGroupCap(els.length));
+  expect(h.overCapped.flat()).toEqual([keyOf(els[0] as Element)]);
+});
+
+test("a model group at the cap is treated in full and records nothing", async () => {
+  // Given: exactly as many items of one key as the floor allows, on a small page.
+  const h = harness(); await h.ready();
+  const els = group(MIN_MODEL_GROUP, "2h");
+  h.response(poison(keyOf(els[0] as Element)));
+  // When
+  h.mutate(document.body, els); h.flush();
+  await h.send(); h.flush();
+  // Then: at or below the cap nothing changes, including the diagnostics record.
+  expect(modelGroupCap(els.length)).toBe(MIN_MODEL_GROUP);
+  expect(treated(els)).toHaveLength(MIN_MODEL_GROUP);
+  expect(els.every((el) => el.dataset.jev === "hide")).toBe(true);
+  expect(h.overCapped).toEqual([]);
+});
+
+test("an item already treated by a model verdict stays treated when the group goes over", async () => {
+  // Given: the cap is reached, then more items of the same key arrive.
+  const h = harness(); await h.ready(); h.painted();
+  const first = group(MIN_MODEL_GROUP, "2h");
+  const key = keyOf(first[0] as Element);
+  h.response(poison(key));
+  h.mutate(document.body, first); h.flush(); await h.send(); h.flush();
+  const before = first.map((el) => el.getAttribute("data-jev"));
+  // When: more of the same skeleton arrive and a cache notification re-flushes every item.
+  const late = group(3, "2h");
+  h.mutate(document.body, late);
+  h.scanner.updateCache(cachedVerdict(key, 0.95)); h.flush();
+  // Then: no treated item is revealed and no capped one is treated or held.
+  expect(before).toEqual(first.map(() => "hide"));
+  expect(first.map((el) => el.getAttribute("data-jev"))).toEqual(before);
+  expect(treated(late)).toHaveLength(0);
+  expect(late.some((el) => el.hasAttribute("data-jev-held"))).toBe(false);
+});
+
+test("ten real-ad cells of one key recycled four times all stay treated", async () => {
+  // Given: the gate review's recycle control. X recycles cells; the page never holds more
+  // than ten items of this key, so the verdict must never be capped.
+  const h = harness(); await h.ready();
+  const cells = group(10, "2h");
+  const adKey = keyOf(cells[0] as Element);
+  h.response(poison(adKey));
+  h.mutate(document.body, cells); h.flush(); await h.send(); h.flush();
+  expect(treated(cells)).toHaveLength(10);
+  // When: each cell is recycled away from the ad skeleton and back, four times over.
+  for (let round = 0; round < 4; round++) {
+    for (const el of cells) {
+      const img = document.createElement("img"); el.append(img); h.mutate(el, [img]); h.flush();
+    }
+    await h.send(); h.flush();
+    for (const el of cells) {
+      el.querySelector("img")?.remove(); h.mutate(el, []); h.flush();
+    }
+  }
+  // Then: the budget is spent by distinct items, not by treatment events.
+  expect(treated(cells)).toHaveLength(10);
+  expect(cells.every((el) => el.dataset.jev === "hide")).toBe(true);
+  expect(h.overCapped).toEqual([]);
+});
+
+test("re-processing the same element under the same key never charges twice", async () => {
+  // Given: a page whose cap is the floor, filled exactly, plus one refused item.
+  const h = harness();
+  const els = group(MIN_MODEL_GROUP + 1, "2h");
+  const key = keyOf(els[0] as Element);
+  const c = cachedVerdict(key, 0.95);
+  await h.ready(DEFAULT_SETTINGS, c);
+  h.mutate(document.body, els); h.flush();
+  expect(treated(els)).toHaveLength(MIN_MODEL_GROUP);
+  // When: every treated item is re-flushed repeatedly through cache notifications.
+  for (let i = 0; i < 3; i++) { h.scanner.updateCache(c); h.flush(); }
+  // Then: the charge count is still exactly the number of treated items, which one
+  // release per element proves - all fifteen free their slot and fifteen fresh items fit.
+  for (const el of els.slice(0, MIN_MODEL_GROUP)) el.remove();
+  const probe = item("99h");
+  h.mutate(document.body, [probe]); h.flush(); await h.send();
+  const fresh = group(MIN_MODEL_GROUP, "2h");
+  h.mutate(document.body, fresh); h.flush();
+  expect(treated(fresh)).toHaveLength(MIN_MODEL_GROUP);
+});
+
+for (const [size, cap] of [[100, 25], [20, MIN_MODEL_GROUP]] as const) {
+  test(`the cap follows the observed item count: ${size} items -> ${cap}`, async () => {
+    // Given
+    const h = harness();
+    const els = group(size, "2h");
+    await h.ready(DEFAULT_SETTINGS, cachedVerdict(keyOf(els[0] as Element), 0.95));
+    // When
+    h.mutate(document.body, els); h.flush();
+    // Then: a quarter of the page, never fewer than the floor.
+    expect(modelGroupCap(size)).toBe(cap);
+    expect(treated(els)).toHaveLength(cap);
+    expect(h.scanner.qa.observedItems).toBe(size);
+  });
+}
+
+test("disconnecting a treated item frees its charge while a held item keeps it", async () => {
+  // Given: the cap filled at the floor by one key, with two further items refused.
+  const h = harness();
+  const els = group(MIN_MODEL_GROUP + 2, "2h");
+  const key = keyOf(els[0] as Element);
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(key, 0.95));
+  h.mutate(document.body, els); h.flush();
+  const [first, second] = els;
+  const refused = els.slice(MIN_MODEL_GROUP);
+  if (!first || !second) throw new Error("missing fixture");
+  expect(treated(refused)).toHaveLength(0);
+  // When: one treated item leaves the DOM and the next batch sweep notices.
+  first.remove();
+  const probe = item("99h");
+  h.mutate(document.body, [probe]); h.flush(); await h.send();
+  h.mutate(refused[0] as Element); h.flush();
+  // Then: the freed slot is taken by one previously refused item.
+  expect((refused[0] as Element).getAttribute("data-jev")).toBe("hide");
+  // When: a treated item is instead recycled inside the viewport after paint, so it is held.
+  h.painted();
+  const img = document.createElement("img"); second.append(img);
+  h.mutate(second, [img]); h.flush();
+  expect(second.getAttribute("data-jev")).toBe("hide");
+  expect(second.hasAttribute("data-jev-held")).toBe(true);
+  h.mutate(refused[1] as Element); h.flush();
+  // Then: a still-hidden item keeps its charge, so nothing else of that key is treated.
+  expect((refused[1] as Element).hasAttribute("data-jev")).toBe(false);
+});
+
+test("a fully cached page view frees the slots of items it never re-requests", async () => {
+  // Given: the cap filled at the floor from the daily cache, so no classify batch ever runs.
+  const h = harness();
+  const cells = group(MIN_MODEL_GROUP, "2h");
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(keyOf(cells[0] as Element), 0.95));
+  h.mutate(document.body, cells); h.flush();
+  expect(treated(cells)).toHaveLength(MIN_MODEL_GROUP);
+  // When: every treated cell leaves the DOM and fifteen fresh ones of that key arrive.
+  for (const el of cells) el.remove();
+  const fresh = group(MIN_MODEL_GROUP, "2h");
+  h.mutate(document.body, fresh); h.flush();
+  // Then: the slots a removed treatment held are free, with no batch to sweep them.
+  expect(h.calls).toHaveLength(0);
+  expect(treated(fresh)).toHaveLength(MIN_MODEL_GROUP);
+});
+
+test("a held then removed cell frees the slot of the key that paid for it", async () => {
+  // Given: the cap filled at the floor by one key, from the cache.
+  const h = harness();
+  const cells = group(MIN_MODEL_GROUP, "2h");
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(keyOf(cells[0] as Element), 0.95));
+  h.mutate(document.body, cells); h.flush();
+  expect(treated(cells)).toHaveLength(MIN_MODEL_GROUP);
+  // When: eight treated cells are recycled inside the viewport after paint, so they are held
+  // under the key that hid them, and X then drops them.
+  h.painted();
+  const held = cells.slice(0, 8);
+  for (const el of held) {
+    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, bottom: 100, width: 100, height: 100 }) });
+    const img = document.createElement("img"); el.append(img); h.mutate(el, [img]); h.flush();
+  }
+  expect(held.every((el) => el.hasAttribute("data-jev-held") && el.dataset.jev === "hide")).toBe(true);
+  for (const el of held) el.remove();
+  // Then: seven live treatments remain of a floor of fifteen, so eight fresh items of that key
+  // fit. Releasing under the recycled-TO key instead would leave none of them treated.
+  const fresh = group(MIN_MODEL_GROUP, "2h");
+  h.mutate(document.body, fresh); h.flush();
+  expect(h.calls).toHaveLength(0);
+  expect(treated(fresh)).toHaveLength(MIN_MODEL_GROUP - 7);
+});
+
+test("navigation clears the charges and the observed item count", async () => {
+  // Given: the cap filled at the floor, one item refused. The verdict arrives by answer, since
+  // a signalKey carries path_kind and so does not survive the navigation below.
+  const h = harness(); await h.ready();
+  h.response(poisonAll);
+  const els = group(MIN_MODEL_GROUP + 1, "2h");
+  h.mutate(document.body, els); h.flush(); await h.send(); h.flush();
+  const refused = els[MIN_MODEL_GROUP];
+  if (!refused) throw new Error("missing fixture");
+  expect(treated(els)).toHaveLength(MIN_MODEL_GROUP);
+  expect(refused.hasAttribute("data-jev")).toBe(false);
+  expect(h.overCapped).toHaveLength(1);
+  // When: most of the treated items are gone and the SPA navigates.
+  for (const el of els.slice(0, 10)) el.remove();
+  window.history.pushState(null, "", "/explore");
+  h.mutate(document.body); h.flush(); await h.send(); h.flush();
+  // Then: the page view starts over - six survivors against a floor of fifteen, so every
+  // survivor is treated. Charges left over from the old page view would still refuse them.
+  expect(h.scanner.qa.observedItems).toBe(MIN_MODEL_GROUP + 1 - 10);
+  expect(treated(els.slice(10))).toHaveLength(MIN_MODEL_GROUP + 1 - 10);
+  expect(refused.getAttribute("data-jev")).toBe("hide");
+  expect(h.overCapped).toHaveLength(1);
+});
+
+test("a held item leaves the verdict it did not apply a full budget", async () => {
+  // Given: the cap filled at the floor below the fold, with every skeleton judged an ad.
+  const h = harness(); await h.ready();
+  h.response(poisonAll);
+  const cells = group(MIN_MODEL_GROUP, "2h");
+  h.mutate(document.body, cells); h.flush(); await h.send(); h.flush();
+  expect(treated(cells)).toHaveLength(MIN_MODEL_GROUP);
+  // When: all fifteen are scrolled into view after paint and recycled to a second skeleton that
+  // the same verdict also wants hidden - so all fifteen are held, still hidden (D6).
+  h.painted();
+  for (const el of cells) {
+    Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top: 0, bottom: 100, width: 100, height: 100 }) });
+    const img = document.createElement("img"); el.append(img); h.mutate(el, [img]); h.flush();
+  }
+  await h.send(); h.flush();
+  expect(cells.filter((el) => el.hasAttribute("data-jev-held"))).toHaveLength(MIN_MODEL_GROUP);
+  expect(cells.every((el) => el.dataset.jev === "hide")).toBe(true);
+  // Then: the recycled-to skeleton paid for none of those holds, so its own items below the
+  // fold all fit its budget. Charging the held item would leave them all untreated.
+  const fresh = Array.from({ length: MIN_MODEL_GROUP }, () => {
+    const el = item("2h", 2000); el.append(document.createElement("img")); return el;
+  });
+  h.mutate(document.body, fresh); h.flush(); await h.send(); h.flush();
+  expect(treated(fresh)).toHaveLength(MIN_MODEL_GROUP);
+});
+
+test("a cache re-notification at the cap never withdraws an existing hide", async () => {
+  // Given: the cap exactly filled below the fold, where no D6 hold can mask a withdrawal.
+  const h = harness();
+  const cells = group(MIN_MODEL_GROUP, "2h");
+  const c = cachedVerdict(keyOf(cells[0] as Element), 0.95);
+  await h.ready(DEFAULT_SETTINGS, c);
+  h.mutate(document.body, cells); h.flush();
+  expect(treated(cells)).toHaveLength(MIN_MODEL_GROUP);
+  // When: the same verdict is broadcast again while its key sits exactly at the cap.
+  h.scanner.updateCache(c); h.flush();
+  // Then: an item this verdict already holds treated keeps its treatment and its slot - a
+  // treatment is never withdrawn, and nothing had to be held to achieve that.
+  expect(treated(cells)).toHaveLength(MIN_MODEL_GROUP);
+  expect(cells.every((el) => el.dataset.jev === "hide")).toBe(true);
+  expect(cells.some((el) => el.hasAttribute("data-jev-held"))).toBe(false);
+});
+
+test("a key whose live group never exceeds the cap is never recorded", async () => {
+  // Given: ten items of one key on a sixty-item page, so the floor is never reached.
+  const h = harness(); await h.ready();
+  const mine = group(10, "2h");
+  const others = group(50, "Sponsored");
+  h.response(poison(keyOf(mine[0] as Element)));
+  h.mutate(document.body, [...mine, ...others]); h.flush(); await h.send(); h.flush();
+  // When: those ten are recycled away and back twice - thirty treatment events in all.
+  for (let round = 0; round < 4; round++) {
+    for (const el of mine) {
+      const img = document.createElement("img"); el.append(img); h.mutate(el, [img]); h.flush();
+    }
+    await h.send(); h.flush();
+    for (const el of mine) {
+      el.querySelector("img")?.remove(); h.mutate(el, []); h.flush();
+    }
+  }
+  // Then: over cap is judged on live items, so a correct verdict is never reported
+  // and the maintainer is never told to clear a good cache entry.
+  expect(treated(mine)).toHaveLength(10);
+  expect(treated(others)).toHaveLength(50);
+  expect(h.overCapped).toEqual([]);
 });
 
 test("DOMContentLoaded does not enqueue already processed initial items again", async () => {

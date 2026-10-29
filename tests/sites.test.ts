@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { AD_WORDS, FOLLOW_WORDS, SUGGESTED_WORDS, matchesWord } from "../src/markers";
 import { SITES, siteForHost, validateSelectors, type SiteConfig } from "../src/sites";
 
@@ -109,6 +111,71 @@ describe("SITES table", () => {
     expect(feed("instagram", "/")).toBe(true);
     expect(feed("linkedin", "/feed/")).toBe(true);
     expect(feed("linkedin", "/messaging/")).toBe(false);
+  });
+});
+
+describe("LinkedIn right-rail ad placement", () => {
+  const cfg = SITES.linkedin;
+  const modules = cfg.modules.map((m) => m.selector).join(",");
+  const load = (file: string): Document =>
+    new DOMParser().parseFromString(readFileSync(join(import.meta.dir, "fixtures", file), "utf8"), "text/html");
+
+  for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
+    describe(file, () => {
+      const doc = load(file);
+
+      test("both rail ad containers match a module selector, and nothing else is added", () => {
+        const matched = [...doc.querySelectorAll(modules)];
+        expect(matched.map((el) => el.getAttribute("data-qa-id"))).toEqual(["init-9", "init-20", "init-21"]);
+        for (const el of matched.slice(1)) expect(el.getAttribute("data-qa-kind")).toBe("module");
+      });
+
+      test("the iframe variant is treated through its container, never through the frame", () => {
+        const frame = doc.querySelector('iframe[componentkey$="_feed_ad"]')!;
+        expect(frame.getAttribute("src")).toBe("about:blank");
+        expect(frame.matches(modules)).toBe(false);
+        expect(frame.parentElement!.matches(modules)).toBe(true);
+        expect(frame.parentElement!.getAttribute("data-qa-id")).toBe("init-20");
+      });
+
+      test("the DOM card variant matches on the slot key alone, with no tag or label guess", () => {
+        const card = doc.querySelector('[data-qa-id="init-21"]')!;
+        expect(card.tagName.toLowerCase()).toBe("div");
+        expect(card.querySelector("iframe")).toBeNull();
+        expect(card.matches(modules)).toBe(true);
+      });
+
+      test("the non-ad rail widget stays unmatched, inside and out", () => {
+        const widget = doc.querySelector('[data-qa-kind="railNegative"]')!;
+        expect(widget.getAttribute("componentkey")).toBe("feedRightNavGamesComponentRef");
+        expect(widget.matches(modules)).toBe(false);
+        expect(widget.querySelectorAll(modules).length).toBe(0);
+        expect(widget.closest(modules)).toBeNull();
+      });
+
+      test("no feed item and nothing inside one matches a module selector", () => {
+        const items = [...doc.querySelectorAll(cfg.item)];
+        expect(items.length).toBeGreaterThanOrEqual(18);
+        for (const el of items) {
+          expect(el.matches(modules)).toBe(false);
+          expect(el.querySelectorAll(modules).length).toBe(0);
+        }
+        expect(doc.querySelectorAll(`[data-testid="mainFeed"] [role="listitem"] [componentkey$="_feed_ad"]`).length).toBe(0);
+      });
+    });
+  }
+
+  test("the rail selectors are anchored on the slot key, not on a nav prefix or a label", () => {
+    const added = cfg.modules.slice(-2).map((m) => m.selector);
+    expect(added).toEqual(['div:has(> iframe[componentkey$="_feed_ad"])', '[componentkey$="_feed_ad"]:not(iframe)']);
+    const host = document.createElement("div");
+    // A differently prefixed slot still matches; a slot the name only starts with must not.
+    host.innerHTML =
+      '<div id="other-nav"><span componentkey="MobileFeedNav_feed_ad"></span></div>' +
+      '<div id="adjacent"><span componentkey="MainFeedDesktopNav_feed_adjacent"></span></div>';
+    expect([...host.querySelectorAll(added.join(","))].map((el) => el.getAttribute("componentkey"))).toEqual([
+      "MobileFeedNav_feed_ad"
+    ]);
   });
 });
 
