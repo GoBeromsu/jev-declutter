@@ -9,6 +9,9 @@ import type { SiteId } from "./types";
 // .omo/evidence/task-18-aside-feed-declutter.txt (fixtures: tests/fixtures/linkedin-react-*.html).
 // The LinkedIn right-rail ad selectors come from a second 2026-10-29 structure probe recorded in
 // .omo/evidence/task-25-aside-feed-declutter.txt.
+// Instagram likewise ships a feed with no `<header>` element at all; those selectors sit alongside
+// the legacy ones and are structure-only evidence from the 2026-10-30 live probe recorded in
+// .omo/evidence/task-28-aside-feed-declutter.txt (fixtures: tests/fixtures/instagram-live-*.html).
 
 export interface SiteModule {
   selector: string;
@@ -88,9 +91,54 @@ export const SITES: Record<SiteId, SiteConfig> = {
     hosts: ["www.instagram.com"],
     item: "article",
     adSelectors: [],
-    labelSlots: 'article header span, article header a[role="link"] + div span',
-    bodyExclude: 'article h1, article ul li, article div[role="button"] span[dir="auto"]',
-    followSlot: "article header button",
+    // The first two selectors are the legacy `<header>` markup. Live Instagram renders NO
+    // `<header>` element at all, so both matched 0 elements and 1 ad-labelled plus 5
+    // suggested-labelled items per page view stayed untreated (.omo/evidence/live-recheck-2026-10-30.md
+    // finding I1). The third covers the current markup and comes from a read-only structure probe
+    // recorded in .omo/evidence/task-28-aside-feed-declutter.txt (fixtures:
+    // tests/fixtures/instagram-live-*.html).
+    // The account row has no attribute of its own: the only non-hashed handles in the whole
+    // article subtree are `dir`, `role`, `tabindex` and two `data-*` names. Every live marker text
+    // node sat inside `span[dir="auto"] > div ... > span`, and its own host span carries NO `dir`.
+    // Both qualifiers are load-bearing, not decoration:
+    //  - `span[dir="auto"]` as the ancestor: the bare `article div[data-interactable] span` form
+    //    read up to 34 chars of free header text live, where this form read at most 3.
+    //  - `:not([dir])`: the caption's text-bearing element IS a `span[dir="auto"]` nested in
+    //    another one, so without the qualifier a label slot reaches post text - which is both a
+    //    privacy leak and a false-positive path, since a one-word caption would match a marker
+    //    word exactly. bodyExclude's last entry covers the same shape, so dropping either one
+    //    alone still leaks nothing - the 2x2 matrix in tests/signals.test.ts pins that, and that
+    //    both read the same `dir` attribute, so the pair guards against a selector regression,
+    //    not against Instagram dropping `dir` from the caption.
+    // Not anchored on `div[data-interactable]` (the hydrated account-row container): 3 of 19
+    // marked items in one probe session carried no such attribute anywhere, and the scanner's
+    // MutationObserver watches childList only, so a late attribute is not re-read.
+    labelSlots: 'article header span, article header a[role="link"] + div span, article span[dir="auto"] span:not([dir])',
+    // The last two bodyExclude entries both exist to keep the attribution line (a reel's audio
+    // credit and its kin) out of chrome_text. It is the one place where a slot-shaped span carried
+    // text that a profile link ALSO carries: 8 and 12 chars, up to 4 strings a session, one of
+    // them unique to its item, so it cannot be dismissed as a shared UI label. The two entries
+    // cover it by shape and by region, which is deliberate - the region-based one is inert in the
+    // markup variant that ships no `data-interactable` attribute at all.
+    //  - `span[dir="auto"] > span`: the attribution and timestamp line, i.e. a DIRECT span child of
+    //    the dir-span. 96 of 96 live marker slots sat under a `div` instead, so no marker lives
+    //    there; adding it changed 0 verdicts and 0 follow reads over 3 sessions, halved the chrome
+    //    strings sent, and - unlike narrowing labelSlots to `span[dir="auto"] div span` - left
+    //    `withheldSlots` untouched, so no item slid onto scan.ts's "no signals at all, keep without
+    //    asking" branch (that alternative moved 4 of 17 items onto it).
+    //  - `div[data-interactable] div[data-interactable]`: the same pill by region, for a shape
+    //    change inside it. Every live marker slot sat at nesting 0 or 1 (28 of 28) and every
+    //    Follow control at exactly 1 (13 of 13), so it cannot reach either.
+    bodyExclude:
+      'article h1, article ul li, article div[role="button"] span[dir="auto"], article span[dir="auto"] span[dir="auto"], article div[data-interactable] div[data-interactable], article span[dir="auto"] > span',
+    // The live Follow control is a `div[role="button"][tabindex]` inside the account row, so the
+    // legacy `article header button` never matched it. Instagram shows it only for an account the
+    // user does not follow, which is what `followMeansSuggested` means here: over four read-only
+    // sessions it appeared on 0 of 13 ORGANIC items (0 even counting every button in the article)
+    // and on 9 of 11 suggested ones, never on an ad. It is anchored on `div[data-interactable]`
+    // rather than on the article so it cannot reach a "Follow" control in the caption or comment
+    // region, and it stays a SECONDARY signal: every live follow item also carried a label.
+    followSlot: 'article header button, article div[data-interactable] [role="button"], article div[data-interactable] button',
     followMeansSuggested: true,
     modules: [
       { selector: 'div:has(> div > a[href="/explore/people/"])', description: "Suggested accounts module" },

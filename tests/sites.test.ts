@@ -179,6 +179,51 @@ describe("LinkedIn right-rail ad placement", () => {
   });
 });
 
+describe("Instagram live feed slots (no <header>)", () => {
+  const cfg = SITES.instagram;
+
+  test("the live selectors are the probed ones and they reach the account row only", () => {
+    expect(cfg.labelSlots.endsWith('article span[dir="auto"] span:not([dir])')).toBe(true);
+    for (const entry of [
+      'article span[dir="auto"] span[dir="auto"]',
+      "article div[data-interactable] div[data-interactable]",
+      'article span[dir="auto"] > span'
+    ]) {
+      expect(cfg.bodyExclude).toContain(entry);
+    }
+    expect(cfg.followSlot).toContain('article div[data-interactable] [role="button"]');
+    const host = document.createElement("div");
+    // The live shapes side by side: the account name, the marker, the attribution line, the
+    // nested pill, the caption, and a control outside any interactable region. Only the marker
+    // may be read; the name is withheld by the link rule and the rest by bodyExclude.
+    host.innerHTML =
+      "<article>" +
+        '<div data-interactable>' +
+          '<span dir="auto"><div><a role="link" href="#"><span id="name">Member One</span></a></div></span>' +
+          '<span dir="auto"><div><span id="label">Sponsored</span></div></span>' +
+          '<span dir="auto"><span id="line">2h</span></span>' +
+          '<div role="button" id="rowFollow"><span>Follow</span></div>' +
+          '<div data-interactable><span dir="auto"><span id="pill">credit</span></span></div>' +
+        "</div>" +
+        '<div><span dir="auto"><div><span dir="auto" id="caption">post text</span></div></span></div>' +
+        '<div role="button" id="outsideFollow"><span>Follow</span></div>' +
+      "</article>";
+    document.body.append(host);
+    try {
+      expect([...host.querySelectorAll(cfg.labelSlots)].map((el) => el.id)).toEqual(["name", "label", "line", "pill"]);
+      expect(host.querySelector("#caption")!.matches(cfg.bodyExclude)).toBe(true);
+      // The attribution line and the pill are slot-shaped, so bodyExclude - not the slot selector
+      // - is what keeps them unread, while the marker one <div> deeper stays readable.
+      expect(host.querySelector("#line")!.closest(cfg.bodyExclude)).not.toBeNull();
+      expect(host.querySelector("#pill")!.closest(cfg.bodyExclude)).not.toBeNull();
+      expect(host.querySelector("#label")!.closest(cfg.bodyExclude)).toBeNull();
+      expect([...host.querySelectorAll(cfg.followSlot)].map((el) => el.id)).toEqual(["rowFollow"]);
+    } finally {
+      host.remove();
+    }
+  });
+});
+
 describe("validateSelectors", () => {
   test("reports site and index for an intentionally invalid selector", () => {
     const bad: SiteConfig = {

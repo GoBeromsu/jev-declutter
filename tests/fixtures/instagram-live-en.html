@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>QA fixture instagram-live-en</title>
+<style>
+html,body{margin:0;padding:0}
+body{font:14px/1.4 sans-serif;color:#111;background:#fff}
+[data-qa-feed]{max-width:640px;margin:0 auto}
+article,div[data-qa-kind=module]{display:block;box-sizing:border-box;border-bottom:1px solid #ddd;padding:8px;overflow:hidden}
+.box{display:block;height:120px;background:#ccd;margin:4px 0}
+.av{height:48px;width:48px}
+.ic{display:inline-block;width:16px;height:16px;background:#bbb}
+ul{list-style:none;margin:2px 0;padding:0}
+</style>
+</head>
+<body>
+<!-- Instagram's live feed markup: NO <header> element anywhere (live-recheck-2026-10-30
+     finding I1). Structure only - synthetic text, href="#" placeholders, no live class token.
+     The account row is a div[data-interactable] whose text sits in span[dir="auto"] > div > span;
+     the marker line is that dir-less span, the account name is the same shape WRAPPED in the
+     profile link, so the todo 26/27 link rules withhold its text and count it in withheldSlots.
+     The caption and the comment list sit outside the account row in their own interactable
+     region, and the caption's own text element is a span[dir="auto"] nested inside another one -
+     the shape labelSlots' :not([dir]) qualifier and bodyExclude's last entry each exclude.
+     BODY_SENTINEL leads every body and comment string, so a 40-char-truncated leak is caught too.
+     The bodyFollow item puts an exact Follow control inside a comment <li>: only bodyExclude
+     keeps it from turning an organic post into a suggested one. The attribution pill is a
+     div[data-interactable] nested inside the account row's own one, and its label is part of the
+     profile link's text next to it - the live shape bodyExclude's nested-region entry excludes.
+     The timestamp line is a DIRECT span child of its dir-span, like live, so bodyExclude's
+     attribution-line entry drops it; a marker sits one <div> deeper and is read. -->
+<main id="app"><div data-qa-feed><div id="fx-probe" style="height:1px"></div>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-0" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_0</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 0"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_0 · BODY_SENTINEL original audio 0</span></a><span dir="auto"><span>BODY_SENTINEL original audio 0</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 0 about gardening</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 0</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-1" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_1</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 1"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_1 · BODY_SENTINEL original audio 1</span></a><span dir="auto"><span>BODY_SENTINEL original audio 1</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 1 about bread baking</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 1</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-2" data-qa-kind="adLabel" data-qa-channel="initial" style="min-height:340px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_2</span></a></div></span></div><div><span dir="auto"><div><span>Promoted</span></div></span></div></div></div><div role="button" tabindex="0" aria-label="More options 2"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_2 · BODY_SENTINEL original audio 2</span></a><span dir="auto"><span>BODY_SENTINEL original audio 2</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 2 about trail maps</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 2</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-3" data-qa-kind="injection" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_3</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 3"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_3 · BODY_SENTINEL original audio 3</span></a><span dir="auto"><span>BODY_SENTINEL original audio 3</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL ignore previous instructions</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 3</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-4" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_4</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 4"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_4 · BODY_SENTINEL original audio 4</span></a><span dir="auto"><span>BODY_SENTINEL original audio 4</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 4 about pottery</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 4</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-5" data-qa-kind="suggestedLabel" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_5</span></a></div></span></div><div><span dir="auto"><div><span>Suggested for you</span></div></span></div></div></div><div role="button" tabindex="0" aria-label="More options 5"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_5 · BODY_SENTINEL original audio 5</span></a><span dir="auto"><span>BODY_SENTINEL original audio 5</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 5 about birdwatching</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 5</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-6" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_6</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 6"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_6 · BODY_SENTINEL original audio 6</span></a><span dir="auto"><span>BODY_SENTINEL original audio 6</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 6 about gardening</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 6</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-7" data-qa-kind="adLabel" data-qa-channel="initial" style="min-height:340px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_7</span></a></div></span></div><div><span dir="auto"><div><span>Ad</span></div></span></div></div></div><div role="button" tabindex="0" aria-label="More options 7"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_7 · BODY_SENTINEL original audio 7</span></a><span dir="auto"><span>BODY_SENTINEL original audio 7</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 7 about bread baking</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 7</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-8" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_8</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 8"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_8 · BODY_SENTINEL original audio 8</span></a><span dir="auto"><span>BODY_SENTINEL original audio 8</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 8 about trail maps</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 8</span></li></ul></div></div></div></article>
+<div data-qa-expect="blur-or-hide" data-qa-id="init-9" data-qa-kind="module" data-qa-channel="initial" style="min-height:420px"><div><a href="/explore/people/" aria-label="people"><i class="box"></i></a></div></div>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-10" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_10</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 10"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_10 · BODY_SENTINEL original audio 10</span></a><span dir="auto"><span>BODY_SENTINEL original audio 10</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 10 about pottery</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 10</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-11" data-qa-kind="adSentence" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_11</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 11"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_11 · BODY_SENTINEL original audio 11</span></a><span dir="auto"><span>BODY_SENTINEL original audio 11</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL The word Ad shows up inside this longer sentence about weekend plans</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 11</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-12" data-qa-kind="adLabel" data-qa-channel="initial" style="min-height:340px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_12</span></a></div></span></div><div><span dir="auto"><div><span>Sponsored</span></div></span></div></div></div><div role="button" tabindex="0" aria-label="More options 12"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_12 · BODY_SENTINEL original audio 12</span></a><span dir="auto"><span>BODY_SENTINEL original audio 12</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 12 about gardening</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 12</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-13" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_13</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 13"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_13 · BODY_SENTINEL original audio 13</span></a><span dir="auto"><span>BODY_SENTINEL original audio 13</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 13 about bread baking</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 13</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="blur-or-hide" data-qa-id="init-14" data-qa-kind="unknown" data-qa-channel="initial" data-qa-model="suggested" style="min-height:300px"><span role="note"></span><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_14</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 14"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_14 · BODY_SENTINEL original audio 14</span></a><span dir="auto"><span>BODY_SENTINEL original audio 14</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 14 about trail maps</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 14</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-15" data-qa-kind="bodyNeg" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_15</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 15"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_15 · BODY_SENTINEL original audio 15</span></a><span dir="auto"><span>BODY_SENTINEL original audio 15</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL 추천 광고 Sponsored are only words inside this body text</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 15</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-16" data-qa-kind="suggestedFollow" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_16</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0"><span>Follow</span></div><div role="button" tabindex="0" aria-label="More options 16"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_16 · BODY_SENTINEL original audio 16</span></a><span dir="auto"><span>BODY_SENTINEL original audio 16</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 16 about pottery</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 16</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-17" data-qa-kind="bodyFollow" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_17</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 17"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_17 · BODY_SENTINEL original audio 17</span></a><span dir="auto"><span>BODY_SENTINEL original audio 17</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 17 about birdwatching</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 17</span><div role="button" tabindex="0"><span>Follow</span></div></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="hide" data-qa-id="init-18" data-qa-kind="adLabel" data-qa-channel="initial" style="min-height:340px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_18</span></a></div></span></div><div><span dir="auto"><div><span>Sponsored</span></div></span></div></div></div><div role="button" tabindex="0" aria-label="More options 18"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_18 · BODY_SENTINEL original audio 18</span></a><span dir="auto"><span>BODY_SENTINEL original audio 18</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 18 about gardening</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 18</span></li></ul></div></div></div></article>
+<article data-interactable data-qa-expect="keep" data-qa-id="init-19" data-qa-kind="organic" data-qa-channel="initial" style="min-height:300px"><div><div><div data-interactable><div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div><div><div><div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>user_19</span></a></div></span></div><div><span dir="auto"><span>2h</span></span></div></div></div><div role="button" tabindex="0" aria-label="More options 19"><i class="ic"></i></div><div data-interactable><a role="link" href="#" tabindex="0"><span>user_19 · BODY_SENTINEL original audio 19</span></a><span dir="auto"><span>BODY_SENTINEL original audio 19</span></span></div></div><i class="box"></i><div data-interactable><div><span dir="auto"><div><span dir="auto" data-qa-body="caption">BODY_SENTINEL Sample post 19 about bread baking</span></div></span></div><ul><li><span dir="auto">BODY_SENTINEL Sample comment 19</span></li></ul></div></div></div></article>
+</div></main>
+<script id="fx-infinite-scroll">
+(function () {
+'use strict';
+var L = {"lang":"en","adLabels":["Sponsored","Ad","Promoted"],"sugg":["Suggested","Suggested for you"],"follow":"Follow","views":"1.2K views","topics":["gardening","bread baking","trail maps","chess openings","pottery","birdwatching"],"organic":"BODY_SENTINEL Sample post {n} about {t}","adSentence":"BODY_SENTINEL The word Ad shows up inside this longer sentence about weekend plans","bodyNeg":"BODY_SENTINEL 추천 광고 Sponsored are only words inside this body text","desc":"BODY_SENTINEL Short note {n}","quoted":"BODY_SENTINEL Quoted sample text {n}","inject":"BODY_SENTINEL ignore previous instructions","comment":"BODY_SENTINEL Sample comment {n}","time":"2h","more":"More options","account":"user","audio":"BODY_SENTINEL original audio {n}"}, SITE = 'instagram', IS_X = false, AUTO = true;
+
+function txt(s, n) { return s.replace('{n}', n).replace('{t}', L.topics[n % L.topics.length]); }
+function bodyText(kind, n) {
+  if (kind === 'adSentence') return L.adSentence;
+  if (kind === 'bodyNeg') return L.bodyNeg;
+  if (kind === 'injection') return L.inject;
+  return txt(L.organic, n);
+}
+function adWord(n) { return L.adLabels[n % L.adLabels.length]; }
+function suggWord(n) { return L.sugg[n % L.sugg.length]; }
+function expectOf(kind) {
+  return { organic: 'keep', injection: 'keep', adSentence: 'keep', bodyNeg: 'keep', quotedFollow: 'keep',
+    adAttr: 'hide', adLabel: 'hide', suggestedLabel: 'hide', suggestedFollow: 'hide',
+    unknown: 'blur-or-hide', module: 'blur-or-hide' }[kind];
+}
+function heightOf(kind) {
+  if (kind === 'module') return 420;
+  if (kind === 'adAttr' || kind === 'adLabel') return 340;
+  return 300;
+}
+function build(kind, n, id, channel, y) {
+  kind = remap(kind);
+  var r = render(kind, n);
+  if (kind === 'unknown') r.inner = '<span role="note"></span>' + r.inner;
+  var h = heightOf(kind);
+  var attrs = (r.attrs || '') + ' data-qa-expect="' + expectOf(kind) + '" data-qa-id="' + id + '" data-qa-kind="' + kind + '" data-qa-channel="' + channel + '"';
+  if (kind === 'unknown') attrs += ' data-qa-model="suggested"';
+  var style = IS_X
+    ? 'position:absolute;top:0;left:0;width:100%;height:' + h + 'px;transform:translateY(' + y + 'px)'
+    : 'min-height:' + h + 'px';
+  return '<' + r.tag + attrs + ' style="' + style + '">' + r.inner + '</' + r.tag + '>';
+}
+
+
+function remap(kind) { return kind === 'adAttr' ? 'adLabel' : kind; }
+function render(kind, n) {
+  if (kind === 'module') {
+    return { tag: 'div', inner: '<div><a href="/explore/people/" aria-label="people"><i class="box"></i></a></div>' };
+  }
+  var t = bodyText(kind, n);
+  // The live account row: no <header>, no class or data hook of its own on the text elements.
+  // The marker/timestamp line is a dir-less <span> under span[dir="auto"] > div; the account name
+  // is the same shape but WRAPPED in the profile link, so the link rules withhold its text.
+  // Live shape: a marker sits under span[dir="auto"] > div > span (96 of 96 live marker slots),
+  // while the timestamp/attribution line is a DIRECT span child, which bodyExclude drops.
+  var marker = '';
+  if (kind === 'adLabel') marker = adWord(n);
+  if (kind === 'suggestedLabel') marker = suggWord(n);
+  var second = marker === ''
+    ? '<span dir="auto"><span>' + L.time + '</span></span>'
+    : '<span dir="auto"><div><span>' + marker + '</span></div></span>';
+  var follow = kind === 'suggestedFollow'
+    ? '<div role="button" tabindex="0"><span>' + L.follow + '</span></div>' : '';
+  var bodyFollow = kind === 'bodyFollow'
+    ? '<div role="button" tabindex="0"><span>' + L.follow + '</span></div>' : '';
+  var row = '<div data-interactable>' +
+      '<div><div><a role="link" href="#" tabindex="0"><i class="box av"></i></a></div></div>' +
+      '<div><div>' +
+        '<div><span dir="auto"><div><a role="link" href="#" tabindex="0"><span>' + L.account + '_' + n + '</span></a></div></span></div>' +
+        '<div>' + second + '</div>' +
+      '</div></div>' +
+      follow +
+      '<div role="button" tabindex="0" aria-label="' + L.more + ' ' + n + '"><i class="ic"></i></div>' +
+      // Attribution pill: a div[data-interactable] nested inside the row's own one. Its label is
+      // ALSO part of the profile link's text, which is why bodyExclude keeps it unread.
+      '<div data-interactable>' +
+        '<a role="link" href="#" tabindex="0"><span>' + L.account + '_' + n + ' \u00B7 ' + txt(L.audio, n) + '</span></a>' +
+        '<span dir="auto"><span>' + txt(L.audio, n) + '</span></span>' +
+      '</div>' +
+    '</div>';
+  // Caption and comments sit OUTSIDE the account row, inside their own interactable region, the
+  // way the live feed renders them: the caption's text element is itself a span[dir="auto"].
+  var tail = '<div data-interactable>' +
+      '<div><span dir="auto"><div><span dir="auto" data-qa-body="caption">' + t + '</span></div></span></div>' +
+      '<ul><li><span dir="auto">' + txt(L.comment, n) + '</span>' + bodyFollow + '</li></ul>' +
+    '</div>';
+  return { tag: 'article', attrs: ' data-interactable', inner: '<div><div>' + row + '<i class="box"></i>' + tail + '</div></div>' };
+}
+var INITIAL = ["organic","organic","adAttr","injection","organic","suggestedLabel","organic","adLabel","organic","module","organic","adSentence","adAttr","organic","unknown","bodyNeg","suggestedFollow","bodyFollow","adLabel","organic"];
+var SCROLL_KINDS = ['organic', 'adAttr', 'organic', 'suggestedFollow', 'organic', 'unknown'];
+var RAF_KINDS = ['adLabel', 'organic'];
+var RO_KINDS = ['adAttr', 'organic'];
+var RECYCLE_KINDS = ['organic', 'adAttr', 'organic', 'suggestedFollow', 'organic', 'unknown', 'adLabel', 'organic'];
+var feed = null, probe = null, ro = null, cells = [], baseY = 0, xEnd = 0;
+var seq = 1000, lastBatchEl = null, idleTimer = 0, idleRuns = 0, lastY = 0, probeH = 1, recN = 0, upN = 0;
+var roQueue = [];
+var fx = window.__fx = { site: SITE, ioFirst: {} };
+
+var io = new IntersectionObserver(function (es) {
+  for (var i = 0; i < es.length; i++) {
+    var el = es[i].target, id = el.getAttribute('data-qa-id');
+    if (!id || fx.ioFirst[id]) continue;
+    fx.ioFirst[id] = {
+      kind: el.getAttribute('data-qa-kind'), expect: el.getAttribute('data-qa-expect'),
+      channel: el.getAttribute('data-qa-channel'), height: es[i].boundingClientRect.height,
+      top: es[i].boundingClientRect.top, jev: el.getAttribute('data-jev'), t: performance.now()
+    };
+  }
+}, { rootMargin: '100000px' });
+
+var obsQ = [], obsScheduled = false;
+function track(el) {
+  if (el.getAttribute('data-qa-expect') !== 'keep') io.observe(el);
+  if (!ro) return;
+  obsQ.push(el);
+  if (obsScheduled) return;
+  obsScheduled = true;
+  requestAnimationFrame(function () {
+    obsScheduled = false;
+    while (obsQ.length) ro.observe(obsQ.shift());
+  });
+}
+function lastRendered() {
+  var list = IS_X ? cells : feed.children;
+  for (var i = list.length - 1; i >= 0; i--) {
+    if (list[i].hasAttribute('data-qa-expect') && list[i].offsetHeight > 0) return list[i];
+  }
+  return null;
+}
+function dmCell(i, ch) {
+  return '<div data-testid="cellInnerDiv" data-qa-expect="keep" data-qa-id="dm-' + i + '" data-qa-kind="dm" data-qa-channel="' + ch + '" style="min-height:120px"><div data-testid="conversation"><div data-testid="User-Name"><div><span>friend_' + i + '</span></div></div><div data-testid="dm-text" dir="ltr">Sample message ' + i + ' BODY_SENTINEL</div></div></div>';
+}
+function dmScroll() {
+  var list = document.getElementById('dm-list');
+  if (!list) return;
+  var last = list.lastElementChild;
+  if (!last || last === lastBatchEl || last.getBoundingClientRect().bottom > window.innerHeight + 800) return;
+  lastBatchEl = last;
+  var html = '';
+  for (var i = 0; i < 10; i++) html += dmCell(seq++, 'scroll');
+  list.insertAdjacentHTML('beforeend', html);
+}
+function tY(c) { var m = /translateY\(([-\d.]+)px\)/.exec(c.style.transform); return m ? parseFloat(m[1]) : 0; }
+function relayout() {
+  var hs = cells.map(function (c) { return c.offsetHeight; });
+  var y = baseY;
+  for (var i = 0; i < cells.length; i++) {
+    var t = 'translateY(' + y + 'px)';
+    if (cells[i].style.transform !== t) cells[i].style.transform = t;
+    y += hs[i];
+  }
+  xEnd = y;
+  if (feed.style.height !== y + 'px') feed.style.height = y + 'px';
+}
+function makeEl(kind, channel, y) {
+  var n = seq++;
+  var t = document.createElement('template');
+  t.innerHTML = build(kind, n, 'ins-' + n, channel, y);
+  return t.content.firstElementChild;
+}
+fx.append = function (kinds, channel) {
+  var out = [];
+  for (var i = 0; i < kinds.length; i++) {
+    var el = makeEl(kinds[i], channel, xEnd);
+    if (IS_X) { xEnd += heightOf(remap(kinds[i])); cells.push(el); feed.style.height = xEnd + 'px'; }
+    feed.appendChild(el);
+    track(el);
+    out.push(el);
+  }
+  return out;
+};
+fx.rafInsert = function (kinds, channel) {
+  requestAnimationFrame(function () { fx.append(kinds, channel || 'raf'); });
+};
+fx.roInsert = function (kinds, channel) {
+  roQueue.push({ kinds: kinds, channel: channel || 'ro' });
+  probeH = probeH === 1 ? 2 : 1;
+  probe.style.height = probeH + 'px';
+};
+fx.batch = function () {
+  fx.append(SCROLL_KINDS, 'scroll');
+  fx.rafInsert(RAF_KINDS, 'raf');
+  fx.roInsert(RO_KINDS, 'ro');
+};
+function recycleInto(c, kind, channel) {
+  kind = remap(kind);
+  var n = seq++;
+  c.innerHTML = (kind === 'unknown' ? '<span role="note"></span>' : '') + render(kind, n).inner;
+  c.setAttribute('data-qa-expect', expectOf(kind));
+  c.setAttribute('data-qa-id', 'rec-' + n);
+  c.setAttribute('data-qa-kind', kind);
+  c.setAttribute('data-qa-channel', channel);
+  if (kind === 'unknown') c.setAttribute('data-qa-model', 'suggested'); else c.removeAttribute('data-qa-model');
+  c.style.height = heightOf(kind) + 'px';
+  io.unobserve(c);
+  if (expectOf(kind) !== 'keep') io.observe(c);
+}
+fx.recycle = function (c, kind, channel) { recycleInto(c, kind, channel || 'recycle'); relayout(); };
+fx.cells = function () { return cells; };
+function xRecycle(y) {
+  var dir = y > lastY ? 1 : (y < lastY ? -1 : 0);
+  lastY = y;
+  var guard = 0;
+  if (dir > 0) {
+    while (cells.length > 12 && guard++ < 3) {
+      var c = cells[0], h = c.offsetHeight;
+      if (tY(c) + h >= y - 3000) break;
+      cells.shift(); baseY += h;
+      recycleInto(c, RECYCLE_KINDS[recN++ % RECYCLE_KINDS.length], 'recycle');
+      cells.push(c);
+      relayout();
+    }
+  } else if (dir < 0) {
+    while (cells.length > 12 && guard++ < 3) {
+      var last = cells[cells.length - 1];
+      if (tY(last) <= y + innerHeight + 3000) break;
+      cells.pop();
+      recycleInto(last, upN++ % 2 === 0 ? 'adAttr' : 'adLabel', 'recycle-up');
+      var hh = last.offsetHeight;
+      if (baseY < hh) { cells.push(last); break; }
+      baseY -= hh; cells.unshift(last);
+      relayout();
+    }
+  }
+}
+function onScroll() {
+  if (!feed) { dmScroll(); return; }
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(function () {
+    if (idleRuns++ < 4) fx.roInsert(['adAttr', 'organic'], 'ro-idle');
+  }, 1000);
+  var last = lastRendered();
+  if (last && last !== lastBatchEl && last.getBoundingClientRect().bottom <= window.innerHeight + 800) {
+    lastBatchEl = last;
+    fx.batch();
+  }
+  if (IS_X) xRecycle(window.scrollY);
+}
+function adopt() {
+  feed = document.querySelector('[data-qa-feed]');
+  probe = document.getElementById('fx-probe');
+  cells = []; baseY = 0; xEnd = 0;
+  ro = new ResizeObserver(function () {
+    if (IS_X) relayout();
+    while (roQueue.length) { var q = roQueue.shift(); fx.append(q.kinds, q.channel); }
+  });
+  ro.observe(probe);
+  var all = feed.querySelectorAll('[data-qa-expect]');
+  for (var i = 0; i < all.length; i++) track(all[i]);
+  if (IS_X) {
+    cells = Array.prototype.filter.call(feed.children, function (e) { return e.getAttribute('data-testid') === 'cellInnerDiv'; });
+    xEnd = cells.reduce(function (s, c) { return s + parseFloat(c.style.height); }, 0);
+  }
+  lastBatchEl = null; lastY = window.scrollY;
+}
+fx.lateModule = function (el) {
+  if (SITE !== 'youtube') return;
+  el.setAttribute('data-qa-expect', 'blur-or-hide');
+  el.setAttribute('data-qa-kind', 'module');
+  var s = document.createElement('ytd-rich-shelf-renderer');
+  s.setAttribute('is-shorts', '');
+  s.innerHTML = '<i class="box"></i>';
+  el.appendChild(s);
+};
+fx.goHome = function () {
+  if (SITE !== 'x') return;
+  history.pushState({}, '', '/home');
+  var app = document.getElementById('app');
+  var y = 0, html = '';
+  for (var i = 0; i < INITIAL.length; i++) { html += build(INITIAL[i], i, 'spa-' + i, 'spa', y); y += heightOf(remap(INITIAL[i])); }
+  app.innerHTML = '<div id="timeline" data-qa-feed style="position:relative;height:' + y + 'px"><div id="fx-probe" style="position:absolute;top:0;left:0;width:1px;height:1px"></div>' + html + '</div>';
+  adopt();
+};
+window.addEventListener('scroll', onScroll, { passive: true });
+if (AUTO) adopt();
+})();
+</script>
+
+</body>
+</html>

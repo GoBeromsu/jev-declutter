@@ -10,8 +10,8 @@ const warningCheck = process.argv.includes("--warning-check");
 const idleOscillationControl = process.argv.includes("--idle-oscillation-control");
 const fixtures = [
   "youtube-en", "youtube-ko", "x-en", "x-ko", "instagram-en",
-  "instagram-ko", "linkedin-en", "linkedin-ko", "linkedin-react-en", "linkedin-react-ko",
-  "stress-x-en", "x-messages-en"
+  "instagram-ko", "instagram-live-en", "instagram-live-ko", "linkedin-en", "linkedin-ko",
+  "linkedin-react-en", "linkedin-react-ko", "stress-x-en", "x-messages-en"
 ] as const;
 
 // Installed by CDP before navigation, including errors from either of the first scripts.
