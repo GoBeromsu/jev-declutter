@@ -604,6 +604,22 @@ test("resetCaches also removes every overcap:* key, whatever day it carries", as
   expect(Object.keys(store).sort()).toEqual(["settings"]);
 });
 
+test("resetCaches and a provider change both keep the user's answers", async () => {
+  // Given: a cached verdict and a user answer for the same signature.
+  store[sigKey("x")] = { a: 1 };
+  store["override:x"] = { entries: { "1fd217c7": { decision: "keep", at: 5 } } };
+  store.settings = { provider: "openai", openai: { model: "gpt-6-luna" } };
+  // When: today's cache is cleared and then the model changes.
+  await bg.resetCaches(NOW);
+  await bg.handleStorageChange(
+    { settings: { oldValue: { provider: "openai", openai: { model: "a" } }, newValue: { provider: "openai", openai: { model: "b" } } } },
+    "local"
+  );
+  // Then: an answer is the user's own verdict, so it never expires with the daily cache.
+  expect(store["override:x"]).toStrictEqual({ entries: { "1fd217c7": { decision: "keep", at: 5 } } });
+  expect(store[sigKey("x")]).toBeUndefined();
+});
+
 test("the reset message answers ok and clears sig:* keys", async () => {
   store[sigKey("x")] = { a: 1 };
   store.settings = { provider: "openai" };

@@ -9,6 +9,7 @@
 //   slowStorage=hold    every storage.local.get waits for __QA_SHIM__.releaseStorage()
 //   holdClassify=1      classify answers wait for __QA_SHIM__.releaseClassify()
 //   ad|suggested|module=<keep|blur|hide>, siteEnabled=false   stored (non-default) settings
+//   seedOverrides=<json>  pre-stored user answers for this site (src/overrides.ts), as a reload would find them
 (function () {
   "use strict";
   var H = globalThis.__JEV_QA_SRC__;
@@ -27,6 +28,7 @@
 
   var store = { settings: settings };
   if (q.has("seedCache")) store[H.sigKey(site)] = JSON.parse(q.get("seedCache"));
+  if (q.has("seedOverrides")) store[H.overrideKey(site)] = JSON.parse(q.get("seedOverrides"));
   var listeners = [];
   var slow = q.get("slowStorage");
   var storageHeld = slow === "hold";

@@ -206,6 +206,20 @@ export async function recordOverCap(site: SiteId, keys: readonly string[], day: 
   await chrome.storage.local.set({ [storageKey]: record });
 }
 
+/**
+ * Drops one signalKey from today's over-cap note. A user answer of "not an ad" (src/overrides.ts)
+ * releases that verdict's whole group, so the note that asked the maintainer to look at it is
+ * answered and must not keep pointing at it.
+ */
+export async function clearOverCap(site: SiteId, key: string, day: string = today()): Promise<void> {
+  const storageKey = overCapKey(site);
+  const stored = await chrome.storage.local.get(storageKey);
+  const known = readOverCap(stored[storageKey], day);
+  if (!known.includes(key)) return;
+  const record: OverCapRecord = { day, keys: known.filter((k) => k !== key) };
+  await chrome.storage.local.set({ [storageKey]: record });
+}
+
 export async function loadSigCache(site: SiteId): Promise<SignatureCache | undefined> {
   const key = sigKey(site);
   const stored = await chrome.storage.local.get(key);

@@ -1,5 +1,6 @@
 import { DAILY_REQUEST_BUDGET, loadOverCap, loadSigCache, providerKey } from "./cache";
 import { today } from "./decide";
+import { clearOverride, clearOverrides, loadOverrides, type OverrideDecision, type OverrideMap } from "./overrides";
 import { DEFAULT_TYPESAFE_MODEL } from "./providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, loadSettings } from "./storage";
 import type { Action, Category, Message, ProviderId, Settings, SiteId } from "./types";
@@ -23,6 +24,8 @@ export interface DiagnosticsView {
   budgetUsed: number;
   /** signalKeys whose model verdict hit its page-view cap today (src/scan.ts), per site. */
   overCap?: Partial<Record<SiteId, readonly string[]>>;
+  /** The user's own answers from the overlay prompt (src/overrides.ts), per site. */
+  overrides?: Partial<Record<SiteId, OverrideMap>>;
 }
 
 type Row = [key: string, ad: string, suggested: string];
@@ -166,6 +169,76 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
   return block;
 }
 
+const DECISION_LABEL: Record<OverrideDecision, string> = { keep: "광고 아님", confirmed: "광고 맞음" };
+
+function overrideBlock(doc: Document, site: SiteId, map: OverrideMap): HTMLElement {
+  const entries = Object.entries(map.entries);
+  const block = el(doc, "section", "diag");
+  block.id = `override-${site}`;
+  block.dataset.count = String(entries.length);
+
+  const head = el(doc, "div", "diag-head");
+  head.append(el(doc, "h3", "", SITE_LABELS[site]), el(doc, "span", "tag tag-fresh", `${entries.length}개`));
+  block.append(head);
+
+  const table = el(doc, "table");
+  const headRow = el(doc, "tr");
+  headRow.append(
+    el(doc, "th", "key", "signalKey"),
+    el(doc, "th", "", "응답"),
+    el(doc, "th", "", "날짜"),
+    el(doc, "th", "", "")
+  );
+  const thead = el(doc, "thead");
+  thead.append(headRow);
+  const body = el(doc, "tbody");
+  for (const [key, entry] of entries) {
+    const row = el(doc, "tr");
+    row.dataset.decision = entry.decision;
+    const action = el(doc, "td");
+    const button = el(doc, "button", "btn btn-row", "지우기");
+    button.type = "button";
+    button.dataset.site = site;
+    button.dataset.key = key;
+    action.append(button);
+    row.append(
+      el(doc, "td", "key", key),
+      el(doc, "td", "", DECISION_LABEL[entry.decision]),
+      el(doc, "td", "", today(new Date(entry.at))),
+      action
+    );
+    body.append(row);
+  }
+  table.append(thead, body);
+  block.append(table);
+  return block;
+}
+
+/** The list is opaque by construction: a signalKey is a hash of structure and chrome labels. */
+export function renderOverrides(
+  overrides: Partial<Record<SiteId, OverrideMap>>,
+  root: ParentNode = document
+): void {
+  const doc = root.ownerDocument ?? (root as Document);
+  const blocks: HTMLElement[] = [];
+  let count = 0;
+  for (const site of SITE_IDS) {
+    const map = overrides[site];
+    const entries = map ? Object.keys(map.entries).length : 0;
+    if (!map || entries === 0) continue;
+    count += entries;
+    blocks.push(overrideBlock(doc, site, map));
+  }
+  const summary = $<HTMLElement>(root, "override-summary");
+  summary.dataset.count = String(count);
+  const label = el(doc, "span", "", "저장된 응답 ");
+  label.append(el(doc, "strong", "", `${count}개`));
+  summary.replaceChildren(label);
+  $<HTMLElement>(root, "overrides").replaceChildren(
+    ...(blocks.length > 0 ? blocks : [el(doc, "p", "empty", "아직 응답이 없습니다.")])
+  );
+}
+
 export function renderDiagnostics(view: DiagnosticsView, root: ParentNode = document): void {
   const doc = root.ownerDocument ?? (root as Document);
   const used = Number.isFinite(view.budgetUsed) && view.budgetUsed >= 0 ? view.budgetUsed : 0;
@@ -186,11 +259,14 @@ export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsVi
   const day = today();
   const caches: Partial<Record<SiteId, unknown>> = {};
   const overCap: Partial<Record<SiteId, readonly string[]>> = {};
+  const answers: Partial<Record<SiteId, OverrideMap>> = {};
   const loaded = await Promise.all(SITE_IDS.map((site) => loadSigCache(site)));
   const capped = await Promise.all(SITE_IDS.map((site) => loadOverCap(site, day)));
+  const stored = await Promise.all(SITE_IDS.map((site) => loadOverrides(site)));
   SITE_IDS.forEach((site, i) => {
     caches[site] = loaded[i];
     overCap[site] = capped[i];
+    answers[site] = stored[i];
   });
   const key = budgetKey(day);
   const budget = (await chrome.storage.local.get(key))[key] as unknown;
@@ -200,6 +276,7 @@ export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsVi
     currentKey: providerKey(settings),
     caches,
     overCap,
+    overrides: answers,
     budgetUsed: typeof count === "number" && Number.isFinite(count) && count >= 0 ? count : 0
   };
 }
@@ -213,7 +290,11 @@ export async function main(root: ParentNode = document): Promise<void> {
     status.textContent = message;
     status.dataset.state = state;
   };
-  const refresh = async () => renderDiagnostics(await loadDiagnostics(await loadSettings()), root);
+  const refresh = async () => {
+    const view = await loadDiagnostics(await loadSettings());
+    renderDiagnostics(view, root);
+    renderOverrides(view.overrides ?? {}, root);
+  };
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -239,6 +320,35 @@ export async function main(root: ParentNode = document): Promise<void> {
         note("reset", "오늘 캐시를 비웠습니다. 다음 페이지 이동부터 다시 판정합니다.");
       } catch (err) {
         note("error", `캐시 비우기 실패: ${describe(err)}`);
+      }
+    })();
+  });
+
+  // One answer at a time, by site and opaque key: the row carries both, so nothing is guessed.
+  $<HTMLElement>(root, "overrides").addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>("button[data-key]") : null;
+    const site = target?.dataset.site;
+    const key = target?.dataset.key;
+    if (key === undefined || site === undefined || !(SITE_IDS as readonly string[]).includes(site)) return;
+    void (async () => {
+      try {
+        await clearOverride(site as SiteId, key);
+        await refresh();
+        note("reset", "응답 1개를 지웠습니다. 다음 페이지 이동부터 다시 판정합니다.");
+      } catch (err) {
+        note("error", `응답 지우기 실패: ${describe(err)}`);
+      }
+    })();
+  });
+
+  $<HTMLButtonElement>(root, "override-clear-all").addEventListener("click", () => {
+    void (async () => {
+      try {
+        await clearOverrides(SITE_IDS);
+        await refresh();
+        note("reset", "저장된 응답을 모두 지웠습니다. 다음 페이지 이동부터 다시 판정합니다.");
+      } catch (err) {
+        note("error", `응답 지우기 실패: ${describe(err)}`);
       }
     })();
   });

@@ -213,6 +213,7 @@
     .btn:active { transform: translateY(1px); }
     .btn-primary { color: var(--color-accent-ink); background: var(--color-accent); border-color: var(--color-accent); }
     .btn-primary:hover { background: var(--color-accent); filter: brightness(0.94); }
+    .btn-row { height: auto; padding: 2px var(--space-3); font-size: var(--text-sm); font-weight: 600; }
     .status { font-size: var(--text-sm); color: var(--color-ink-2); }
     .status[data-state="saved"], .status[data-state="reset"] { color: var(--color-ok); }
     .status[data-state="error"] { color: var(--color-danger); }
@@ -381,6 +382,20 @@
       <div class="body">
         <p id="budget" class="budget"></p>
         <div id="diagnostics"></div>
+      </div>
+    </section>
+
+    <section class="card" style="--i: 5" aria-labelledby="h-overrides">
+      <header>
+        <h2 id="h-overrides">직접 응답</h2>
+        <p>흐리게 처리된 항목 위에서 “예 / 아니오”를 눌렀던 기록입니다. 날마다 지워지지 않으며, 모델 판정보다 우선합니다. 키는 구조 서명이라 게시물 내용을 담지 않습니다.</p>
+      </header>
+      <div class="body">
+        <p id="override-summary" class="budget"></p>
+        <div id="overrides"></div>
+        <div class="toolbar">
+          <button type="button" id="override-clear-all" class="btn">응답 모두 지우기</button>
+        </div>
       </div>
     </section>
   </div>

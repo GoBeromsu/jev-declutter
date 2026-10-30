@@ -1,7 +1,8 @@
 import { beforeEach, expect, test } from "bun:test";
 import { DAILY_REQUEST_BUDGET, overCapKey } from "../src/cache";
 import { today } from "../src/decide";
-import { collectForm, main, populateForm, renderDiagnostics } from "../src/options";
+import { collectForm, main, populateForm, renderDiagnostics, renderOverrides } from "../src/options";
+import { overrideKey } from "../src/overrides";
 import { DEFAULT_TYPESAFE_MODEL } from "../src/providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, sigKey } from "../src/storage";
 import type { Settings, SiteId } from "../src/types";
@@ -27,6 +28,9 @@ Object.assign(globalThis, {
         get: async (key: string) => (key in store ? { [key]: clone(store[key]) } : {}),
         set: async (values: Record<string, unknown>) => {
           Object.assign(store, clone(values));
+        },
+        remove: async (keys: string | string[]) => {
+          for (const key of typeof keys === "string" ? [keys] : keys) delete store[key];
         }
       }
     },
@@ -91,6 +95,10 @@ const cacheOf = (day: string, providerKey: string, entries: Record<string, unkno
   entries,
   order
 });
+
+const AT = Date.parse("2026-10-30T09:00:00");
+const overrideRows = (doc: Document, site: SiteId) =>
+  Array.from($(doc, `override-${site}`).querySelectorAll("tbody tr"));
 
 test("markup: lang=ko, masked key fields, no remote assets, no free-text goal fields", () => {
   const doc = page();
@@ -383,4 +391,81 @@ test("a failed reset message surfaces as an error state instead of an unhandled 
   const state = await nextState(doc, () => $<HTMLButtonElement>(doc, "reset").click());
   expect(state).toBe("error");
   expect($<HTMLElement>(doc, "status").textContent).toContain("no background");
+});
+
+test("renderOverrides lists the count and one row per opaque key with its decision", () => {
+  const doc = page();
+  renderOverrides(
+    {
+      x: { entries: { k1: { decision: "keep", at: AT }, k2: { decision: "confirmed", at: AT } } },
+      youtube: { entries: {} },
+      linkedin: { entries: { k3: { decision: "keep", at: AT } } }
+    },
+    doc
+  );
+
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("3");
+  expect($<HTMLElement>(doc, "override-summary").textContent).toContain("3");
+  expect($<HTMLElement>(doc, "override-x").dataset.count).toBe("2");
+  expect(overrideRows(doc, "x").map((r) => (r as HTMLElement).dataset.decision)).toEqual(["keep", "confirmed"]);
+  expect(cells(overrideRows(doc, "x")[0]).slice(0, 3)).toEqual(["k1", "광고 아님", today(new Date(AT))]);
+  expect(cells(overrideRows(doc, "x")[1]).slice(0, 3)).toEqual(["k2", "광고 맞음", today(new Date(AT))]);
+  expect(overrideRows(doc, "linkedin").length).toBe(1);
+  // A site with no answers has no block at all, so the list only names what exists.
+  expect(doc.querySelector("#override-youtube")).toBeNull();
+  expect(doc.querySelector("#override-instagram")).toBeNull();
+  // Every row can be cleared on its own, by site and opaque key.
+  const button = overrideRows(doc, "x")[0]?.querySelector<HTMLButtonElement>("button[data-key]");
+  expect(button?.dataset.site).toBe("x");
+  expect(button?.dataset.key).toBe("k1");
+});
+
+test("renderOverrides shows an empty state and no rows when nothing was answered", () => {
+  const doc = page();
+  renderOverrides({ x: { entries: {} } }, doc);
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("0");
+  expect($<HTMLElement>(doc, "overrides").querySelectorAll("tr").length).toBe(0);
+  expect($<HTMLElement>(doc, "overrides").textContent).toContain("아직");
+});
+
+test("main renders stored answers and a row's clear button removes exactly that answer", async () => {
+  store[overrideKey("x")] = { entries: { keep1: { decision: "keep", at: AT }, keep2: { decision: "confirmed", at: AT } } };
+  store[overrideKey("instagram")] = { entries: { other: { decision: "keep", at: AT } } };
+  const doc = page();
+  await main(doc);
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("3");
+
+  const button = overrideRows(doc, "x")[0]?.querySelector<HTMLButtonElement>("button[data-key]");
+  const state = await nextState(doc, () => button?.click());
+  expect(state).toBe("reset");
+  expect(store[overrideKey("x")]).toStrictEqual({ entries: { keep2: { decision: "confirmed", at: AT } } });
+  expect(store[overrideKey("instagram")]).toStrictEqual({ entries: { other: { decision: "keep", at: AT } } });
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("2");
+});
+
+test("the clear-all button removes every site's answers and leaves the caches alone", async () => {
+  const day = today();
+  store[overrideKey("x")] = { entries: { a: { decision: "keep", at: AT } } };
+  store[overrideKey("youtube")] = { entries: { b: { decision: "confirmed", at: AT } } };
+  store[sigKey("x")] = cacheOf(day, "openai:gpt-6-luna:1", { a: { ad: 1, suggested: 1 } });
+  const doc = page();
+  await main(doc);
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("2");
+
+  const state = await nextState(doc, () => $<HTMLButtonElement>(doc, "override-clear-all").click());
+  expect(state).toBe("reset");
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("0");
+  expect(Object.keys(store).filter((k) => k.startsWith("override:"))).toEqual([]);
+  expect(store[sigKey("x")]).toBeDefined();
+  expect(sent).toEqual([]);
+});
+
+test("a malformed stored answer record never reaches the list", async () => {
+  store[overrideKey("x")] = { entries: { good: { decision: "keep", at: AT }, bad: { decision: "whatever", at: AT } } };
+  store[overrideKey("linkedin")] = "junk";
+  const doc = page();
+  await main(doc);
+  expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("1");
+  expect(overrideRows(doc, "x").map((r) => cells(r)[0] ?? "")).toEqual(["good"]);
+  expect(doc.querySelector("#override-linkedin")).toBeNull();
 });

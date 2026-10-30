@@ -1,5 +1,7 @@
-import { ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
+import { clearOverCap, ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
 import { actionFor, combine, ITEM_CSS, placement, today } from "./decide";
+import { createOverlay, type OverlayHost, type OverlayOrigin, type OverlayRect } from "./overlay";
+import { emptyOverrides, loadOverrides, lookupOverride, saveOverride, type OverrideDecision, type OverrideMap } from "./overrides";
 import { deterministic } from "./rules";
 import { extractSignals, toDescriptor } from "./signals";
 import type { SiteConfig } from "./sites";
@@ -34,9 +36,16 @@ export interface ScanHost {
   cancelTimer(id: number): void;
   /** Diagnostics only: signalKeys whose model group hit its cap in this page view. */
   overCap(keys: readonly string[]): void;
+  /** The user's stored answers for this site; they never expire with the daily cache. */
+  overrides(): Promise<OverrideMap | undefined>;
+  /** Persists one answer. Fire-and-forget: the page never waits for storage. */
+  override(key: string, decision: OverrideDecision): void;
+  overlay: OverlayHost;
 }
 
 function browserHost(cfg: SiteConfig): ScanHost {
+  // The prompt is built before the scanner exists; startScanner registers the real sink.
+  const overlay = createOverlay(() => undefined);
   return {
     settings: loadSettings, cache: () => loadSigCache(cfg.id),
     send: (message) => chrome.runtime.sendMessage<Message, ClassifyResult>(message),
@@ -63,7 +72,16 @@ function browserHost(cfg: SiteConfig): ScanHost {
     timer: (callback) => window.setTimeout(() => { void callback(); }, 120),
     cancelTimer: (id) => window.clearTimeout(id),
     // A diagnostics hint must never break the scan: storage failure is simply no hint.
-    overCap: (keys) => { void recordOverCap(cfg.id, keys).catch(() => undefined); }
+    overCap: (keys) => { void recordOverCap(cfg.id, keys).catch(() => undefined); },
+    overrides: () => loadOverrides(cfg.id),
+    // Nothing leaves the browser here: the key is the opaque signalKey, and a "not an ad" answer
+    // also answers the over-cap note that named it.
+    override: (key, decision) => {
+      void saveOverride(cfg.id, key, decision)
+        .then(() => (decision === "keep" ? clearOverCap(cfg.id, key) : undefined))
+        .catch(() => undefined);
+    },
+    overlay
   };
 }
 
@@ -77,6 +95,8 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   let settings = DEFAULT_SETTINGS;
   let nextSettings: Settings | undefined;
   let cache = freshCache(today(), providerKey(settings));
+  let overrides: OverrideMap = emptyOverrides();
+  let answerEpoch = 0;
   let cacheReady = false;
   let stopped = false;
   let path = location.pathname;
@@ -173,6 +193,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     path = location.pathname;
     generation++;
     queue.clear(); inflight.clear(); answers.clear(); pending.clear(); applyRO.disconnect(); nearIO.disconnect();
+    host.overlay.clear();
     charges.clear(); chargedUnder = new WeakMap(); overCapped.clear(); reportedOverCap = 0;
     observedItems = 0; observedSeen = new WeakSet(); qa.observedItems = 0;
     processed = new WeakMap();
@@ -180,7 +201,27 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (!excluded()) for (const el of document.querySelectorAll("[data-jev-held]")) el.removeAttribute("data-jev-held");
     if (nextSettings) { settings = nextSettings; nextSettings = undefined; }
     cache = ensureCurrent(cache, today(), providerKey(settings));
+    reloadOverrides();
     initial();
+  }
+
+  /**
+   * An answer cleared on the options page must stop applying without a full page load, which is
+   * what the options page tells the user. The in-memory copy is replaced only if this page view is
+   * still the one that asked (generation) and no answer was given while the read was in flight
+   * (answerEpoch), so a slow read can never undo the user's newest answer. Items are re-judged
+   * only when the answers actually changed.
+   */
+  function reloadOverrides() {
+    const sentGeneration = generation;
+    const epoch = answerEpoch;
+    void host.overrides().then((stored) => {
+      if (stopped || generation !== sentGeneration || answerEpoch !== epoch) return;
+      const next = stored ?? emptyOverrides();
+      if (JSON.stringify(next.entries) === JSON.stringify(overrides.entries)) return;
+      overrides = next;
+      for (const el of states.keys()) { processed.delete(el); observe(el); }
+    }).catch(() => undefined);
   }
 
   function schedule() {
@@ -192,7 +233,12 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     timerId = undefined;
     if (!active() || host.now() < pauseUntil) return;
     for (const [el, state] of states) {
-      if (!el.isConnected) { uncharge(el); states.delete(el); nearIO.unobserve(el); priority.delete(el); }
+      if (!el.isConnected) {
+        uncharge(el); states.delete(el); nearIO.unobserve(el); priority.delete(el);
+        // An item that left the page takes its prompt with it: a pill over whatever moved up into
+        // its place would answer for a skeleton the user never judged.
+        host.overlay.hide(el);
+      }
     }
     const liveKeys = new Set([...states.values()].map((state) => state.key));
     for (const key of queue.keys()) if (!liveKeys.has(key)) queue.delete(key);
@@ -243,14 +289,20 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   function flush(applyPath: "ro" | "mutation") {
     if (!active()) return;
     cache = ensureCurrent(cache, today(), providerKey(settings));
-    const writes: { el: Element; want: Action; top: number; reveal: boolean; key: string; charge?: string }[] = [];
+    const writes: {
+      el: Element; want: Action; top: number; reveal: boolean; key: string; charge?: string;
+      model: boolean; rect: OverlayRect;
+    }[] = [];
     const painted = pageHasPainted();
+    // One geometry read of the prompt layer per flush, taken only when a prompt may be needed.
+    let origin: OverlayOrigin | undefined;
     // Slots claimed earlier in THIS flush, so items of one key cannot all read the same count.
     const claimed = new Map<string, number>();
     for (const el of pending) {
       applyRO.unobserve(el);
       if (!el.isConnected) {
         uncharge(el);
+        host.overlay.hide(el);
         pending.delete(el); states.delete(el); nearIO.unobserve(el); priority.delete(el); continue;
       }
       const isModule = modules !== "" && el.matches(modules);
@@ -259,6 +311,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       let descriptor: ItemDescriptor | undefined;
       let want: Action | undefined;
       let chargeKey: string | undefined;
+      let fromModel = false;
       if (isModule) {
         key = "module"; want = settings.actions.module;
       } else {
@@ -271,8 +324,14 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         if (local) want = actionFor(local.category, local.p, settings.actions);
         else if (!cacheReady) continue;
         else {
-          const scores = lookup(cache, key) ?? answers.get(key);
-          if (scores) {
+          const override = lookupOverride(overrides, key);
+          const scores = override ? undefined : lookup(cache, key) ?? answers.get(key);
+          // Precedence is deterministic > user override > cache/model, and an override is also an
+          // answer FOR the key: the model is never asked about it again, so answering costs no
+          // request, takes no cap slot and offers no further prompt.
+          if (override) want = override.decision === "keep" ? "keep" : actionFor("ad", 1, settings.actions);
+          else if (scores) {
+            fromModel = true;
             want = scoreAction(scores);
             // One model answer is a single judgement about a skeleton, not evidence about each
             // item wearing it. While it already holds a quarter of this page view's items treated,
@@ -311,13 +370,18 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       }
       const desired = want ?? "keep";
       const reveal = el.getAttribute("data-jev") === "hide" && (recycled || desired !== "hide");
-      writes.push({ el, want: desired, reveal, key, charge: chargeKey,
-        top: reveal && painted ? revealTop(el) : el.getBoundingClientRect().top });
+      const box = el.getBoundingClientRect();
+      if (fromModel && desired !== "keep") origin ??= host.overlay.origin();
+      writes.push({ el, want: desired, reveal, key, charge: chargeKey, model: fromModel,
+        rect: { top: box.top, left: box.left, width: box.width, height: box.height },
+        top: reveal && painted ? revealTop(el) : box.top });
     }
     // Complete every geometry read before the first attribute write.
-    for (const { el, want, top, reveal, key, charge: chargeKey } of writes) {
+    for (const { el, want, top, reveal, key, charge: chargeKey, model, rect } of writes) {
       if (el.hasAttribute("data-jev-held") || (reveal && painted && top < innerHeight)) {
         el.setAttribute("data-jev-held", "");
+        // What is on screen is a stale verdict, not the current one: there is nothing to confirm.
+        host.overlay.hide(el);
         // The previous verdict is still the one on screen, so it keeps its slot - and because a
         // claim is only committed below, the verdict that was not applied takes none.
         continue;
@@ -329,6 +393,13 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       if (el.getAttribute("data-jev") === "blur" && action === "hide") action = "blur";
       if (action === "keep") el.removeAttribute("data-jev");
       else el.setAttribute("data-jev", action);
+      // The prompt belongs to a MODEL verdict that the placement rule BLURRED, and to nothing
+      // else: a deterministic verdict is per-item evidence that needs no confirmation, a module is
+      // not a feed item, and a hidden item is not on screen to point at. A zero-sized box has no
+      // place to put a prompt either.
+      if (model && action === "blur" && origin && rect.width > 0 && rect.height > 0) {
+        host.overlay.show(el, key, rect, origin);
+      } else host.overlay.hide(el);
       // The charge follows the treatment that is now on screen: this verdict takes the slot, or a
       // verdict whose treatment just went away (revealed, recycled, re-keyed) gives one back.
       if (chargeKey !== undefined) charge(chargeKey, el);
@@ -340,7 +411,36 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       reportedOverCap = overCapped.size;
       host.overCap([...overCapped]);
     }
+    // Every re-layout the page does silently - content inserted above a prompted item, a cell
+    // re-positioned, an item detached - reaches the scanner as a flush and nothing else. A prompt
+    // is never moved to follow, so one that no longer covers its item is dropped here. Free while
+    // no prompt is up, and it also re-checks geometry this flush's own writes may have changed.
+    host.overlay.revalidate();
     schedule();
+  }
+
+  /**
+   * A user answer replaces the model's guess about that whole skeleton. Both decisions re-run the
+   * normal placement path for every item of the key, so no treatment is ever written outside the
+   * one rule: "keep" releases them - an already hidden item inside the viewport still stays hidden
+   * for this page view, because revealing it would move content under the cursor (IS-3/D6), and
+   * the next navigation starts it from the override - while "confirmed" keeps what is on screen.
+   */
+  function answered(key: string, decision: OverrideDecision) {
+    answerEpoch++;
+    overrides = { entries: { ...overrides.entries, [key]: { decision, at: Date.now() } } };
+    host.override(key, decision);
+    // The model verdict's cap slots go back either way: the user has now judged this key, so it is
+    // no longer a shared guess spending this page view's budget.
+    for (const member of [...(charges.get(key) ?? [])]) uncharge(member);
+    if (decision === "keep" && overCapped.delete(key)) reportedOverCap--;
+    for (const [el, state] of states) {
+      if (state.key !== key) continue;
+      state.want = undefined;
+      processed.delete(el);
+      observe(el);
+    }
+    flush("ro");
   }
 
   const applyRO = host.resize(() => flush("ro"));
@@ -394,6 +494,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (globalThis.__JEV_QA_ENABLE__ === true) qa.callbackDurations.push(host.now() - started);
   });
 
+  host.overlay.answers(answered);
   const style = document.getElementById("jev-declutter") ?? document.createElement("style");
   style.id = "jev-declutter";
   style.textContent = ITEM_CSS;
@@ -437,6 +538,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (!changed) return;
     if (!settings.sites[cfg.id].enabled && pageHasPainted()) return;
     if (!settings.sites[cfg.id].enabled) {
+      host.overlay.clear();
       for (const el of states.keys()) { el.removeAttribute("data-jev"); el.removeAttribute("data-jev-held"); }
       return;
     }
@@ -444,9 +546,13 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     for (const el of states.keys()) observe(el);
     initial();
   });
-  void Promise.all([settingsPromise, cachePromise]).then(([, loaded]) => {
+  const overridesPromise = host.overrides().catch(() => undefined);
+  // One gate for both: an unknown item waits until the user's answers are known, so a key the
+  // user already judged can never produce a model request on a fresh page load.
+  void Promise.all([settingsPromise, cachePromise, overridesPromise]).then(([, loaded, stored]) => {
     if (stopped) return;
     cache = ensureCurrent(loaded, today(), providerKey(settings)); cacheReady = true;
+    overrides = stored ?? emptyOverrides();
     for (const el of pending) { applyRO.unobserve(el); applyRO.observe(el); }
   });
 
@@ -462,7 +568,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     },
     stop() {
       stopped = true; generation++;
-      disconnectMO(); applyRO.disconnect(); nearIO.disconnect();
+      disconnectMO(); applyRO.disconnect(); nearIO.disconnect(); host.overlay.clear();
       if (frameId !== undefined) host.cancelFrame(frameId);
       if (timerId !== undefined) host.cancelTimer(timerId);
       document.removeEventListener("visibilitychange", visibility);

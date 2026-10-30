@@ -189,6 +189,10 @@ const beforeNavigation = String.raw`(() => {
 const drivers = String.raw`(() => {
   const Q = window.Q = {};
   Q.failures = [];
+  // Set by a scenario that DELIBERATELY re-lays the page out (todo 29's stranded-prompt cases).
+  // Shifts at or after this timestamp are the harness's own and are reported as harnessShift;
+  // the extension's shift is still asserted to be zero for everything before it. Default 0 = off.
+  Q.relayoutFrom = 0;
   Q.scrollUpCases = [];
   Q.history = new Map();
   Q.warningDepth = [];
@@ -388,8 +392,9 @@ const drivers = String.raw`(() => {
     // If those probes are removed, this exclusion must be removed with them.
     const prePaintEntries = m.shifts.filter(e => firstPaint !== undefined && e.at < firstPaint);
     const excludedPrePaint = { count:prePaintEntries.length, sum:prePaintEntries.reduce((sum,e) => sum+e.value, 0) };
-    const shift = m.shifts.filter(e => !e.recent && (firstPaint === undefined || e.at >= firstPaint))
-      .reduce((sum,e) => sum+e.value, 0);
+    const counted = m.shifts.filter(e => !e.recent && (firstPaint === undefined || e.at >= firstPaint));
+    const shift = counted.filter(e => Q.relayoutFrom === 0 || e.at < Q.relayoutFrom).reduce((sum,e) => sum+e.value, 0);
+    const harnessShift = counted.filter(e => Q.relayoutFrom !== 0 && e.at >= Q.relayoutFrom).reduce((sum,e) => sum+e.value, 0);
     Q.assert(errors.length === 0, "no page errors or unhandled rejections", errors);
     Q.assert(shift === 0, "layout-shift total is zero", m.shifts);
     // A long task measures the HOST, not the extension: F3, the todo 16 phase-1 run and the
@@ -490,7 +495,8 @@ const drivers = String.raw`(() => {
       warningDepth: Q.warningDepth
     };
     return { failures: Q.failures, processed: window.__JEV_QA__?.processed ?? 0, items: Q.items().length,
-      shift, maxAnchorShift: Math.max(0,...m.anchors.map(e => e.shift)), p95, maxCallback: max,
+      shift, harnessShift, relayoutFrom: Q.relayoutFrom,
+      maxAnchorShift: Math.max(0,...m.anchors.map(e => e.shift)), p95, maxCallback: max,
       warnings, warningAssertions, errors, runStart: Q.runStart, longtasks: m.longtasks, runLongtasks,
       longTaskDiagnostics, anchors: m.anchors,
       paint, firstPaint:firstPaint ?? null, excludedPrePaint, layoutEntries, collisionGroups, itemTable,
@@ -517,6 +523,9 @@ type BrowserReport = {
   readonly failures: readonly unknown[];
   readonly shift: number;
   readonly maxAnchorShift: number;
+  /** todo 29: the stored user answers after the scenario answered a prompt, and the key it answered. */
+  readonly overrideSnapshot?: unknown;
+  readonly overrideKey?: string;
   readonly collisionGroups?: readonly CollisionGroup[];
   readonly firstPaint: number | null;
   readonly excludedPrePaint: { readonly count: number; readonly sum: number };
@@ -546,7 +555,11 @@ type LongTaskDiagnostics = {
 };
 /** "not-executed": a fixture/mode filter excluded the extension-free control from this run. */
 type ControlStatus = "zero" | "nonzero" | "errored" | "not-executed";
-type Scenario = { readonly name: string; readonly query?: string; readonly path?: string; readonly code: string };
+type Scenario = {
+  readonly name: string; readonly query?: string; readonly path?: string; readonly code: string;
+  /** Writes `<fixture>.<file>.png` after the scenario returns, with whatever is still on screen. */
+  readonly screenshot?: string;
+};
 type ScenarioReport = { readonly name: string; readonly report?: BrowserReport; readonly error?: string };
 
 const baseline = String.raw`
@@ -663,6 +676,195 @@ const poisonedCacheCap = String.raw`
   return { ...report, poisonedCap: { key:poisoned, cap, observed, group:group.length, treated:treated.length,
     ads:ads.length, shift:report.shift, maxAnchorShift:report.maxAnchorShift } };`;
 
+// todo 29: the user answer prompt on a model-blurred item. `arrange=model` puts one unknown item
+// inside the viewport and its exact clone at the feed's end, so both share one signalKey:
+// `holdClassify=1` then keeps the verdict until after first paint, which is the blur case.
+// answer=no|yes answers the prompt; an absent answer leaves it up for the screenshot.
+const overlayPrompt = String.raw`
+  await Q.ready();
+  const answer = new URLSearchParams(location.search).get("answer") || "";
+  const prompts = () => [...document.querySelectorAll("[data-jev-overlay]")];
+  const item = document.querySelector("[data-qa-model]");
+  const far = document.querySelector('[data-qa-id="reconcile-far"]');
+  Q.assert(!!item && !!far && item !== far, "the fixture offers the model item and its far clone", !!far);
+  await Q.frame();
+  const style = item.getAttribute("style");
+  const box = item.getBoundingClientRect();
+  const child = item.firstElementChild;
+  const childBox = child.getBoundingClientRect();
+  Q.assert(box.top >= 0 && box.top < innerHeight, "the model item starts inside the viewport", box.top);
+  Q.assert(far.getBoundingClientRect().top >= innerHeight, "its clone starts below the fold", far.getBoundingClientRect().top);
+  Q.assert(prompts().length === 0, "no prompt before any verdict", prompts().length);
+  // The verdict lands after first paint, so the placement rule blurs it in place.
+  __QA_SHIM__.releaseClassify();
+  await Q.models();
+  const key = __JEV_QA_SRC__.keyOf(item, __JEV_QA_SITE__);
+  Q.assert(key === __JEV_QA_SRC__.keyOf(far, __JEV_QA_SITE__), "both items share one signalKey");
+  Q.assert(item.getAttribute("data-jev") === "blur", "the late model verdict blurs the painted item", item.getAttribute("data-jev"));
+  Q.assert(far.getAttribute("data-jev") === "hide", "the same-key item below the fold is hidden", far.getAttribute("data-jev"));
+  const deterministic = Q.items().filter(el => ["adAttr","adLabel","suggestedLabel","suggestedFollow"].includes(el.getAttribute("data-qa-kind")));
+  const modules = Q.items().filter(el => el.getAttribute("data-qa-kind") === "module");
+  Q.assert(deterministic.length > 0 && deterministic.every(el => Q.action(el) === "hide"), "deterministic items are hidden", deterministic.map(el => Q.action(el)));
+  Q.assert(modules.length > 0 && modules.every(el => Q.action(el)), "modules are treated", modules.map(el => Q.action(el)));
+  for (const el of Q.items()) {
+    if (el.getAttribute("data-qa-expect") === "keep") Q.assert(!Q.action(el), "keep item untouched " + el.getAttribute("data-qa-id"), Q.action(el));
+  }
+  // Exactly one prompt, on the model-blurred item: so no hidden, deterministic or module item has one.
+  const prompt = prompts()[0];
+  Q.assert(prompts().length === 1 && prompt.getAttribute("data-jev-key") === key,
+    "one prompt only, on the model-blurred item",
+    { prompts: prompts().length, key, promptKey: prompt && prompt.getAttribute("data-jev-key"),
+      hidden: Q.items().filter(el => Q.action(el) === "hide").length });
+  // Isolation: outside every feed element, in its own shadow root, unaffected by the item's blur.
+  Q.assert(!prompt.closest("[data-qa-expect]") && !item.contains(prompt), "the prompt is outside every feed element");
+  Q.assert(!!prompt.shadowRoot && prompt.shadowRoot.querySelectorAll("style").length === 1, "the prompt carries its own styles in a shadow root");
+  Q.assert(prompt.textContent === "", "nothing of the prompt leaks into the page tree", prompt.textContent);
+  Q.assert(getComputedStyle(prompt).filter === "none" && getComputedStyle(prompt).opacity === "1", "the prompt is not blurred with the item",
+    { filter: getComputedStyle(prompt).filter, opacity: getComputedStyle(prompt).opacity });
+  // The item itself is untouched: same style attribute, same box, same containing block for its children.
+  const after = item.getBoundingClientRect();
+  Q.assert(item.getAttribute("style") === style, "the item's style attribute is untouched", item.getAttribute("style"));
+  Q.assert(after.top === box.top && after.left === box.left && after.width === box.width && after.height === box.height,
+    "the item's box is unchanged", { before: box.toJSON(), after: after.toJSON() });
+  Q.assert(!item.querySelector("[data-jev-overlay]"), "the item gained no child");
+  // The containing block of the item's own children is unchanged: they did not move either.
+  const childAfter = child.getBoundingClientRect();
+  Q.assert(childAfter.top === childBox.top && childAfter.left === childBox.left &&
+    childAfter.width === childBox.width && childAfter.height === childBox.height,
+    "the item's children did not move", { before: childBox.toJSON(), after: childAfter.toJSON() });
+  const pr = prompt.getBoundingClientRect();
+  Q.assert(pr.top >= after.top - 1 && pr.left >= after.left - 1 && pr.right <= after.right + 1,
+    "the prompt sits inside the item's own box", { prompt: pr.toJSON(), item: after.toJSON() });
+  const text = prompt.shadowRoot.textContent;
+  const lang = document.documentElement.lang;
+  Q.assert(text.includes(lang === "ko" ? "광고 맞아요?" : "Is this an ad?"), "the prompt speaks the page language", { lang, text });
+  Q.assert(text.includes(lang === "ko" ? "아니오" : "No") && text.includes(lang === "ko" ? "예" : "Yes"), "both answers are offered", text);
+  if (answer === "") return { ...await Q.report(), overlayPrompt: { key, lang, text, prompt: pr.toJSON(), item: after.toJSON() } };
+
+  // Answering: nothing reaches the page, nothing reaches the network.
+  const pageEvents = [];
+  const spy = e => pageEvents.push(e.type);
+  for (const type of ["click", "mousedown", "pointerdown", "keydown"]) document.addEventListener(type, spy);
+  const callsBefore = __QA_SHIM__.calls.length;
+  const hrefBefore = location.href;
+  const button = prompt.shadowRoot.querySelector('[data-answer="' + answer + '"]');
+  Q.assert(!!button, "the prompt offers the " + answer + " button");
+  await Q.wait(() => !prompt.isConnected, "the prompt is dismissed", () => {
+    button.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, composed: true, cancelable: true }));
+    button.click();
+  });
+  await Q.frame(); await Q.frame();
+  const stored = __QA_SHIM__.snapshot()[__JEV_QA_SRC__.overrideKey(__JEV_QA_SITE__)];
+  const entry = stored && stored.entries ? stored.entries[key] : undefined;
+  Q.assert(!!entry, "the answer is persisted under its signalKey", stored);
+  Q.assert(entry.decision === (answer === "no" ? "keep" : "confirmed"), "the stored decision is the user's answer", entry);
+  Q.assert(Object.keys(entry).sort().join(",") === "at,decision", "only a decision and a timestamp are stored", entry);
+  Q.assert(typeof entry.at === "number" && entry.at > 0, "the answer carries a timestamp", entry);
+  Q.assert(!JSON.stringify(stored).includes("BODY_SENTINEL"), "no page text is stored", stored);
+  Q.assert(__QA_SHIM__.calls.length === callsBefore, "answering sends nothing", { callsBefore, now: __QA_SHIM__.calls.length });
+  Q.assert(pageEvents.length === 0, "no event from the prompt reaches the page", pageEvents);
+  Q.assert(location.href === hrefBefore, "answering never navigates");
+  Q.assert(prompts().length === 0, "the answered prompt is gone", prompts().length);
+  if (answer === "no") {
+    await Q.wait(() => !item.hasAttribute("data-jev"), "the answered item is unblurred");
+    Q.assert(!far.hasAttribute("data-jev"), "every same-key item on the page is released", far.getAttribute("data-jev"));
+    Q.assert(!far.hasAttribute("data-jev-held"), "a released item below the fold is not merely held");
+  } else {
+    Q.assert(item.getAttribute("data-jev") === "blur", "yes keeps the treatment", item.getAttribute("data-jev"));
+    Q.assert(far.getAttribute("data-jev") === "hide", "yes keeps the same-key item hidden", far.getAttribute("data-jev"));
+  }
+  Q.assert(deterministic.every(el => Q.action(el) === "hide"), "an answer never touches a deterministic verdict", deterministic.map(el => Q.action(el)));
+  for (const type of ["click", "mousedown", "pointerdown", "keydown"]) document.removeEventListener(type, spy);
+  return { ...await Q.report(), overrideSnapshot: stored, overrideKey: key };`;
+
+// todo 29 attempt 2: a prompt must never be left standing over something it does not describe.
+// Each run re-lays the page out in one way the page never reports to the scanner - content
+// inserted above the item, the column narrowing as on a window resize, the item being detached -
+// WITHOUT scrolling, and then requires that no prompt is stranded: every prompt still on screen
+// must sit inside the item whose signalKey it carries, or be gone.
+const overlayStranded = String.raw`
+  await Q.ready();
+  const prompts = () => [...document.querySelectorAll("[data-jev-overlay]")];
+  const item = document.querySelector("[data-qa-model]");
+  Q.assert(!!item, "the fixture offers a model item");
+  await Q.frame();
+  __QA_SHIM__.releaseClassify();
+  await Q.models();
+  const key = __JEV_QA_SRC__.keyOf(item, __JEV_QA_SITE__);
+  const box = () => item.getBoundingClientRect();
+  Q.assert(item.getAttribute("data-jev") === "blur", "the late model verdict blurs the painted item", item.getAttribute("data-jev"));
+  Q.assert(prompts().length === 1, "the prompt is up before the page re-lays out", prompts().length);
+  // A prompt still on screen must sit inside the item whose key it carries. One over another post
+  // - or over the background - is the stranded case: answering it would persist a permanent
+  // verdict for a skeleton the user never judged.
+  const stranded = () => prompts().filter(host => {
+    const r = host.getBoundingClientRect();
+    const owner = Q.items().find(el => {
+      const b = el.getBoundingClientRect();
+      return b.width > 0 && b.height > 0 &&
+        r.left >= b.left - 1 && r.right <= b.right + 1 && r.top >= b.top - 1 && r.bottom <= b.bottom + 1;
+    });
+    return !owner || __JEV_QA_SRC__.keyOf(owner, __JEV_QA_SITE__) !== host.getAttribute("data-jev-key");
+  }).map(host => ({ key: host.getAttribute("data-jev-key"), rect: host.getBoundingClientRect().toJSON(),
+    over: Q.items().filter(el => { const b = el.getBoundingClientRect();
+      const r = host.getBoundingClientRect();
+      return b.width > 0 && b.height > 0 && r.top >= b.top - 1 && r.bottom <= b.bottom + 1; })
+      .map(el => el.getAttribute("data-qa-id")) }));
+  Q.assert(stranded().length === 0, "the fresh prompt is not stranded", stranded());
+  const settle = async () => { await Q.frame(); await Q.frame(); await Q.frame(); };
+  const feed = document.querySelector("[data-qa-feed]");
+  const how = new URLSearchParams(location.search).get("strand");
+  const before = box();
+  // From here the HARNESS moves the page on purpose; its own shift is reported separately and the
+  // extension's shift is still asserted to be zero for everything before this point.
+  Q.relayoutFrom = performance.now();
+  if (how === "insert") {
+    const banner = document.createElement("div");
+    banner.style.cssText = "height:200px";
+    feed.insertBefore(banner, feed.firstElementChild);
+    await settle();
+    Q.assert(box().top - before.top > 100, "the insertion really moved the item", { before: before.top, after: box().top });
+  } else if (how === "resize") {
+    feed.style.maxWidth = "320px";
+    window.dispatchEvent(new Event("resize"));
+    await settle();
+    Q.assert(before.width - box().width > 100, "the resize really changed the item's box", { before: before.width, after: box().width });
+  } else {
+    item.remove();
+    await settle();
+    Q.assert(!item.isConnected, "the item really left the page");
+    Q.assert(!document.querySelector('[data-jev-key="' + key + '"]'), "the detached item's prompt is gone",
+      prompts().map(h => h.getAttribute("data-jev-key")));
+  }
+  Q.assert(stranded().length === 0, "no prompt is stranded by a " + how, stranded());
+  // Whatever survived must still be answerable only for what it is actually sitting on.
+  for (const host of prompts()) {
+    const live = Q.items().find(el => __JEV_QA_SRC__.keyOf(el, __JEV_QA_SITE__) === host.getAttribute("data-jev-key"));
+    Q.assert(!!live, "a surviving prompt still names an item on the page", host.getAttribute("data-jev-key"));
+  }
+  return { ...await Q.report(), stranded: { how, key, prompts: prompts().length } };`;
+
+// The same stored answer, as a fresh page load finds it: no request for that key, no treatment, no prompt.
+const overrideReload = String.raw`
+  await Q.ready(); await Q.storage(); await Q.frame();
+  const key = new URLSearchParams(location.search).get("overriddenKey");
+  const mine = Q.items().filter(el => __JEV_QA_SRC__.keyOf(el, __JEV_QA_SITE__) === key);
+  Q.assert(mine.length >= 2, "the stored answer covers more than one item on this page", mine.length);
+  Q.assert(mine.every(el => !Q.action(el) && !el.hasAttribute("data-jev-held")),
+    "a stored keep answer leaves every item of its key untouched", mine.map(el => Q.action(el)));
+  Q.assert(!document.querySelector("[data-jev-overlay]"), "an answered key is never asked about again");
+  // Q.models() cannot be used here: it waits for an answer about EVERY data-qa-model item, and the
+  // answered key is exactly the one that must never be asked about. Wait for the rest instead.
+  await Q.wait(() => __QA_SHIM__.calls.length > 0 && __QA_SHIM__.inflight === 0, "the provider answers the remaining keys");
+  await Q.frame(); await Q.frame();
+  Q.assert(__QA_SHIM__.calls.every(c => c.items.every(i => i.key !== key)), "the answered key never reaches the provider",
+    __QA_SHIM__.calls.map(c => c.items.map(i => i.key)));
+  Q.assert(mine.every(el => !Q.action(el)), "the stored answer still wins once the provider has answered", mine.map(el => Q.action(el)));
+  Q.assert(!document.querySelector("[data-jev-overlay]"), "no prompt appears for an answered key");
+  const deterministic = Q.items().filter(el => ["adAttr","adLabel","suggestedLabel","suggestedFollow"].includes(el.getAttribute("data-qa-kind")));
+  Q.assert(deterministic.length > 0 && deterministic.every(el => Q.action(el)), "deterministic verdicts still apply", deterministic.length);
+  return { ...await Q.report(), overrideReload: { key, items: mine.length } };`;
+
 const cleanControl = String.raw`
   await Q.ready();
   Q.assert(!window.__JEV_QA__ && !document.getElementById("jev-declutter"), "control has no extension runtime");
@@ -772,6 +974,19 @@ function modes(fixture: string): Scenario[] {
     Q.assert(top.getAttribute("data-jev") === "blur", "painted late module blurs");
     Q.assert(bottom.getAttribute("data-jev") === "hide", "below late module hides");
     return Q.report();` });
+  // todo 29: the user answer prompt. The screenshot run leaves the prompt up, on the Korean
+  // fixture, so the evidence shows the ko wording; the answer runs assert both decisions.
+  if (fixture === "x-ko") result.push({ name: "overlay-prompt", query: "holdClassify=1&arrange=model", code: overlayPrompt, screenshot: "overlay" });
+  if (fixture === "x-en") result.push(
+    { name: "overlay-no", query: "holdClassify=1&arrange=model&answer=no", code: overlayPrompt },
+    { name: "overlay-yes", query: "holdClassify=1&arrange=model&answer=yes", code: overlayPrompt }
+  );
+  // A flow-layout fixture, where inserting or narrowing really moves the prompted item.
+  if (fixture === "linkedin-en") {
+    for (const how of ["insert", "resize", "detach"]) {
+      result.push({ name: `overlay-stranded-${how}`, query: `holdClassify=1&arrange=model&strand=${how}`, code: overlayStranded });
+    }
+  }
   if (fixture.startsWith("x-")) result.push({ name: "recycled-hidden", code: String.raw`
     await Q.ready(); await Q.models();
     const ads = Q.items().filter(el => el.getAttribute("data-jev") === "hide" && el.getAttribute("data-qa-kind") === "adAttr");
@@ -812,7 +1027,8 @@ const helperBuild = await Bun.build({
           import { DEFAULT_SETTINGS, sigKey } from ${JSON.stringify(root + "/src/storage.ts")};
           import { MIN_MODEL_GROUP, MODEL_GROUP_SHARE, modelGroupCap, providerKey } from ${JSON.stringify(root + "/src/cache.ts")};
           import { today } from ${JSON.stringify(root + "/src/decide.ts")};
-          globalThis.__JEV_QA_SRC__ = { DEFAULT_SETTINGS, sigKey, providerKey, today, MIN_MODEL_GROUP, MODEL_GROUP_SHARE, modelGroupCap,
+          import { overrideKey } from ${JSON.stringify(root + "/src/overrides.ts")};
+          globalThis.__JEV_QA_SRC__ = { DEFAULT_SETTINGS, sigKey, providerKey, today, overrideKey, MIN_MODEL_GROUP, MODEL_GROUP_SHARE, modelGroupCap,
             modules: SITES[globalThis.__JEV_QA_SITE__].modules.map(m => m.selector).join(","),
             descriptorOf: (el, site) => toDescriptor(0, el, SITES[site], extractSignals(el, SITES[site])),
             keyOf: (el, site) => toDescriptor(0, el, SITES[site], extractSignals(el, SITES[site])).key };
@@ -979,6 +1195,19 @@ try {
         }
         const report = await bounded(view.evaluate<BrowserReport>(`(async () => { ${scenario.code} })()`), `${fixture}/${scenario.name}`);
         reports.push({ name: scenario.name, report });
+        if (scenario.screenshot) {
+          const shot = await bounded(
+            view.cdp<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: false }),
+            "screenshot"
+          );
+          await Bun.write(resolve(evidence, `${fixture}.${scenario.screenshot}.png`), Buffer.from(shot.data, "base64"));
+        }
+        // The same stored answer, read back by a fresh page load: persistence across a reload.
+        if (scenario.name === "overlay-no" && report.overrideSnapshot && report.overrideKey) {
+          scenarios.push({ name: "override-reload", code: overrideReload,
+            query: `arrange=model&overriddenKey=${report.overrideKey}` +
+              `&seedOverrides=${encodeURIComponent(JSON.stringify(report.overrideSnapshot))}` });
+        }
         if (scenario.name === "scroll" && fixture === "stress-x-en" && report.cacheSnapshot && !forcedHide && !collisionControl && !warningCheck) {
           const snapshot = report.cacheSnapshot as CacheSnapshot;
           // The fixture's largest all-keep group is its organic skeleton; poison exactly that key.

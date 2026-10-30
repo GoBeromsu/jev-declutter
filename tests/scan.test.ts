@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { startScanner, type ScanHost, type Mutation } from "../src/scan";
+import type { OverrideDecision, OverrideMap } from "../src/overrides";
 import { deterministic } from "../src/rules";
 import { SITES, type SiteConfig } from "../src/sites";
 import { DEFAULT_SETTINGS } from "../src/storage";
@@ -27,8 +28,16 @@ function harness(cfg = SITES.x) {
   cleanups.push(() => { if (originalLocation) Object.defineProperty(globalThis, "location", originalLocation); });
   const settings = deferred<Settings>();
   const cache = deferred<SignatureCache | undefined>();
+  const overrides = deferred<OverrideMap | undefined>();
+  // The first read is the page-load one; later reads (an SPA navigation) see the current store.
+  let storedOverrides: OverrideMap | undefined;
+  let overrideReads = 0;
+  let lastOverrideRead: Promise<OverrideMap | undefined> = overrides.promise;
   const calls: Message[] = [];
   const overCapped: string[][] = [];
+  const saved: { key: string; decision: OverrideDecision }[] = [];
+  const prompts = new Map<Element, string>();
+  let answer: (key: string, decision: OverrideDecision) => void = () => {};
   const targets = new Set<Element>();
   const observations: Element[] = [];
   let mutation: (records: readonly Mutation[]) => void = () => {};
@@ -50,12 +59,31 @@ function harness(cfg = SITES.x) {
     frame: (cb) => { frame = cb; return 1; }, cancelFrame: () => { frame = undefined; },
     postTask: (cb) => { task = cb; },
     timer: (cb) => { timer = cb; return 1; }, cancelTimer: () => { timer = undefined; },
-    overCap: (keys) => { overCapped.push([...keys]); }
+    overCap: (keys) => { overCapped.push([...keys]); },
+    overrides: () => {
+      lastOverrideRead = overrideReads++ === 0 ? overrides.promise : Promise.resolve(storedOverrides);
+      return lastOverrideRead;
+    },
+    override: (key, decision) => { saved.push({ key, decision }); },
+    overlay: {
+      answers: (cb) => { answer = cb; },
+      origin: () => ({ top: 0, left: 0 }),
+      show: (el, key) => { prompts.set(el, key); },
+      hide: (el) => { prompts.delete(el); },
+      // The real one also drops a prompt whose item moved; geometry is stubbed here, so this
+      // fake models the rule the scanner depends on: an item that left the page loses its prompt.
+      revalidate: () => { for (const el of [...prompts.keys()]) if (!el.isConnected) prompts.delete(el); },
+      clear: () => { prompts.clear(); }
+    }
   };
   const scanner = startScanner(cfg, host);
   cleanups.push(scanner.stop);
   return {
-    settings, cache, calls, overCapped, targets, observations, scanner,
+    settings, cache, overrides, calls, overCapped, saved, prompts, targets, observations, scanner,
+    prompt: (el: Element) => prompts.get(el),
+    answer: (key: string, decision: OverrideDecision) => answer(key, decision),
+    setOverrides: (value: OverrideMap | undefined) => { storedOverrides = value; },
+    overridesRead: () => lastOverrideRead,
     painted: () => { painted = true; },
     time: (value: number) => { now = value; },
     response: (fn: (message: Message) => Promise<ClassifyResult>) => { response = fn; },
@@ -67,8 +95,10 @@ function harness(cfg = SITES.x) {
     hasFrame: () => frame !== undefined,
     near: (elements: Element[]) => near(elements),
     send: async () => { const cb = timer; timer = undefined; await cb?.(); },
-    ready: async (value = DEFAULT_SETTINGS, c?: SignatureCache) => {
-      settings.resolve(value); cache.resolve(c); await settings.promise; await cache.promise;
+    ready: async (value = DEFAULT_SETTINGS, c?: SignatureCache, o?: OverrideMap) => {
+      storedOverrides = o;
+      settings.resolve(value); cache.resolve(c); overrides.resolve(o);
+      await settings.promise; await cache.promise; await overrides.promise;
     }
   };
 }
@@ -77,7 +107,7 @@ function item(label = "Sponsored", top = 1000) {
   const el = document.createElement("div");
   el.dataset.testid = "cellInnerDiv";
   if (label) el.innerHTML = `<div data-testid="socialContext">${label}</div>`;
-  Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top, bottom: top + 100, width: 100, height: 100 }) });
+  Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100 }) });
   document.body.append(el);
   return el;
 }
@@ -901,6 +931,211 @@ test("a key whose live group never exceeds the cap is never recorded", async () 
   expect(treated(mine)).toHaveLength(10);
   expect(treated(others)).toHaveLength(50);
   expect(h.overCapped).toEqual([]);
+});
+
+// --- todo 29: user answers on model-blurred items ---------------------------------------------
+
+const unknownAt = (top: number) => item("2h", top);
+
+function moduleItem(top = 0) {
+  const el = document.createElement("div");
+  el.setAttribute("aria-label", "Timeline: Trending now");
+  Object.defineProperty(el, "getBoundingClientRect", { configurable: true, value: () => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100 }) });
+  document.body.append(el);
+  return el;
+}
+
+const overrideMap = (key: string, decision: OverrideDecision): OverrideMap => ({ entries: { [key]: { decision, at: 1 } } });
+
+test("a keep answer short-circuits the model: no request, no treatment, no prompt", async () => {
+  // Given: the user has already said this skeleton is not an ad.
+  const h = harness();
+  const el = unknownAt(0);
+  await h.ready(DEFAULT_SETTINGS, undefined, overrideMap(keyOf(el), "keep"));
+  h.painted();
+  // When
+  h.mutate(document.body, [el]); h.flush(); await h.send(); h.flush();
+  // Then: answering costs nothing afterwards - the key never reaches the provider again.
+  expect(h.calls).toHaveLength(0);
+  expect(el.hasAttribute("data-jev")).toBe(false);
+  expect(h.prompts.size).toBe(0);
+});
+
+test("a confirmed answer treats the item from the user's own verdict, without a request or a prompt", async () => {
+  const h = harness();
+  const below = unknownAt(2000);
+  const inView = unknownAt(0);
+  await h.ready(DEFAULT_SETTINGS, undefined, overrideMap(keyOf(below), "confirmed"));
+  h.painted();
+  // When
+  h.mutate(document.body, [below, inView]); h.flush(); await h.send(); h.flush();
+  // Then: the user's yes is per-item evidence like a deterministic signal - placement still rules.
+  expect(h.calls).toHaveLength(0);
+  expect(below.dataset.jev).toBe("hide");
+  expect(inView.dataset.jev).toBe("blur");
+  expect(h.prompts.size).toBe(0);
+});
+
+test("an answer never overrides a deterministic verdict and a deterministic item never gets a prompt", async () => {
+  const h = harness();
+  const inView = item("Sponsored", 0);
+  const below = item("Sponsored", 2000);
+  await h.ready(DEFAULT_SETTINGS, undefined, overrideMap(keyOf(inView), "keep"));
+  h.painted();
+  // When
+  h.mutate(document.body, [inView, below]); h.flush();
+  // Then: deterministic > user override, and no prompt is offered for it.
+  expect(inView.dataset.jev).toBe("blur");
+  expect(below.dataset.jev).toBe("hide");
+  expect(h.prompts.size).toBe(0);
+});
+
+test("the prompt appears only on a model blur, never on a hide, a deterministic item or a module", async () => {
+  // Given
+  const h = harness(); await h.ready(); h.painted();
+  const modelInView = unknownAt(0);
+  const modelBelow = unknownAt(2000);
+  const deterministicInView = item("Sponsored", 0);
+  const mod = moduleItem(0);
+  const key = keyOf(modelInView);
+  h.response(poison(key));
+  // When
+  h.mutate(document.body, [modelInView, modelBelow, deterministicInView, mod]); h.flush();
+  await h.send(); h.flush();
+  // Then
+  expect(modelInView.dataset.jev).toBe("blur");
+  expect(modelBelow.dataset.jev).toBe("hide");
+  expect(deterministicInView.dataset.jev).toBe("blur");
+  expect(mod.dataset.jev).toBe("blur");
+  expect([...h.prompts.keys()]).toEqual([modelInView]);
+  expect(h.prompt(modelInView)).toBe(key);
+});
+
+test("answering no unblurs the item, releases every same-key item and sends nothing", async () => {
+  // Given: three items of one model-judged skeleton, two in view and one below the fold.
+  const h = harness(); await h.ready(); h.painted();
+  const inView = unknownAt(0);
+  const second = unknownAt(0);
+  const filler = item("", 2000);
+  const below = unknownAt(2000);
+  const localAd = item("Sponsored", 0);
+  const key = keyOf(inView);
+  h.response(poison(key));
+  h.mutate(document.body, [inView, second, filler, below, localAd]); h.flush();
+  await h.send(); h.flush();
+  expect([inView.dataset.jev, second.dataset.jev, below.dataset.jev]).toEqual(["blur", "blur", "hide"]);
+  const before = h.calls.length;
+  // When: the user answers "not an ad".
+  h.answer(key, "keep");
+  // Then: every same-key item on the page is released, the answer is persisted, nothing is sent.
+  expect(inView.hasAttribute("data-jev")).toBe(false);
+  expect(second.hasAttribute("data-jev")).toBe(false);
+  expect(below.hasAttribute("data-jev")).toBe(false);
+  expect(localAd.dataset.jev).toBe("blur");
+  expect(h.saved).toEqual([{ key, decision: "keep" }]);
+  expect(h.calls).toHaveLength(before);
+  expect(h.prompts.size).toBe(0);
+});
+
+test("answering yes keeps the treatment, persists the confirmation and drops the prompt", async () => {
+  // Given
+  const h = harness(); await h.ready(); h.painted();
+  const inView = unknownAt(0);
+  const below = unknownAt(2000);
+  const key = keyOf(inView);
+  h.response(poison(key));
+  h.mutate(document.body, [inView, below]); h.flush(); await h.send(); h.flush();
+  expect(h.prompt(inView)).toBe(key);
+  const before = h.calls.length;
+  // When
+  h.answer(key, "confirmed");
+  // Then
+  expect(inView.dataset.jev).toBe("blur");
+  expect(below.dataset.jev).toBe("hide");
+  expect(h.saved).toEqual([{ key, decision: "confirmed" }]);
+  expect(h.calls).toHaveLength(before);
+  expect(h.prompts.size).toBe(0);
+});
+
+test("a reload applies the stored answer ahead of the cached model verdict", async () => {
+  // Given: yesterday's answer and today's cached model verdict for the same key.
+  const h = harness();
+  const el = unknownAt(0);
+  const key = keyOf(el);
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(key, 0.95), overrideMap(key, "keep"));
+  h.painted();
+  // When
+  h.mutate(document.body, [el]); h.flush(); await h.send(); h.flush();
+  // Then: deterministic > user override > cache/model, and no prompt reappears.
+  expect(el.hasAttribute("data-jev")).toBe(false);
+  expect(h.calls).toHaveLength(0);
+  expect(h.prompts.size).toBe(0);
+});
+
+test("a keep answer returns every cap slot the model verdict was holding", async () => {
+  // Given: one poisoned verdict holding the model group cap on a hundred-item page.
+  const h = harness(); await h.ready();
+  const els = group(100, "2h");
+  const key = keyOf(els[0] as Element);
+  h.response(poison(key));
+  h.mutate(document.body, els); h.flush(); await h.send(); h.flush();
+  expect(treated(els)).toHaveLength(modelGroupCap(els.length));
+  expect(h.overCapped.at(-1)).toEqual([key]);
+  // When
+  h.answer(key, "keep");
+  // Then: nothing of that key is treated and no slot stays spent.
+  expect(treated(els)).toHaveLength(0);
+  expect(h.saved).toEqual([{ key, decision: "keep" }]);
+});
+
+test("a detached item loses its prompt in the scanner's own sweep", async () => {
+  // Given: a model blur with its prompt up.
+  const h = harness(); await h.ready(); h.painted();
+  const el = unknownAt(0);
+  const key = keyOf(el);
+  h.response(poison(key));
+  h.mutate(document.body, [el]); h.flush(); await h.send(); h.flush();
+  expect(h.prompt(el)).toBe(key);
+  // When: another item queues a request, the page drops the prompted one ("not interested", a
+  // timeline re-render) and the next batch sweeps its state - with no flush in between, so the
+  // sweep is the only thing that can drop the prompt.
+  h.mutate(document.body, [item("3h", 2000)]); h.flush();
+  el.remove();
+  await h.send();
+  // Then: no pill is left behind to answer for a post that is no longer there.
+  expect(h.prompts.size).toBe(0);
+});
+
+test("a flush drops the prompt of an item the page detached without telling the scanner", async () => {
+  // Given
+  const h = harness(); await h.ready(); h.painted();
+  const el = unknownAt(0);
+  h.response(poison(keyOf(el)));
+  h.mutate(document.body, [el]); h.flush(); await h.send(); h.flush();
+  expect(h.prompts.size).toBe(1);
+  // When: the item is gone and any unrelated item re-flushes the scanner.
+  el.remove();
+  h.mutate(document.body, [item("Sponsored", 2000)]); h.flush();
+  // Then
+  expect(h.prompts.size).toBe(0);
+});
+
+test("an SPA navigation re-reads the stored answers, so a cleared answer applies again", async () => {
+  // Given: an answered key, so the cached model verdict is held back.
+  const h = harness();
+  const el = unknownAt(2000);
+  const key = keyOf(el);
+  await h.ready(DEFAULT_SETTINGS, cachedVerdict(key, 0.95), overrideMap(key, "keep"));
+  h.mutate(document.body, [el]); h.flush();
+  expect(el.hasAttribute("data-jev")).toBe(false);
+  // When: the user clears that answer on the options page and the SPA navigates.
+  h.setOverrides(undefined);
+  window.history.pushState(null, "", "/home/latest");
+  h.mutate(document.body); h.flush();
+  await h.overridesRead();
+  h.flush();
+  // Then: the cleared answer stops applying, exactly as the options page says it will.
+  expect(el.dataset.jev).toBe("hide");
 });
 
 test("DOMContentLoaded does not enqueue already processed initial items again", async () => {
