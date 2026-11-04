@@ -1,5 +1,5 @@
 import { clearOverCap, ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
-import { actionFor, combine, ITEM_CSS, placement, today } from "./decide";
+import { actionFor, actionsOf, combine, ITEM_CSS, placement, today } from "./decide";
 import { createOverlay, type OverlayHost, type OverlayOrigin, type OverlayRect } from "./overlay";
 import { emptyOverrides, loadOverrides, lookupOverride, saveOverride, type OverrideDecision, type OverrideMap } from "./overrides";
 import { deterministic } from "./rules";
@@ -131,8 +131,9 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   const qa = { callbackDurations: [] as number[], processed: 0, observedItems: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
   const excluded = () => cfg.excludedPaths.some((re) => re.test(location.pathname));
   const active = () => !stopped && !excluded() && settings.sites[cfg.id].enabled;
+  const actions = () => actionsOf(settings.hideSuggested);
   const scoreAction = (s: { ad: number | null; suggested: number | null }) =>
-    combine(actionFor("ad", s.ad, settings.actions), actionFor("suggested", s.suggested, settings.actions));
+    combine(actionFor("ad", s.ad, actions()), actionFor("suggested", s.suggested, actions()));
 
   const charged = (key: string, el: Element) => chargedUnder.get(el) === key;
 
@@ -313,7 +314,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       let chargeKey: string | undefined;
       let fromModel = false;
       if (isModule) {
-        key = "module"; want = settings.actions.module;
+        key = "module"; want = actions().suggested;
       } else {
         const signals = extractSignals(el, cfg);
         descriptor = toDescriptor(n++, el, cfg, signals);
@@ -321,7 +322,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         // The cap's denominator: distinct feed items this page view has shown us, modules excluded.
         if (!observedSeen.has(el)) { observedSeen.add(el); qa.observedItems = ++observedItems; }
         const local = deterministic(signals, cfg);
-        if (local) want = actionFor(local.category, local.p, settings.actions);
+        if (local) want = actionFor(local.category, local.p, actions());
         else if (!cacheReady) continue;
         else {
           const override = lookupOverride(overrides, key);
@@ -329,7 +330,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
           // Precedence is deterministic > user override > cache/model, and an override is also an
           // answer FOR the key: the model is never asked about it again, so answering costs no
           // request, takes no cap slot and offers no further prompt.
-          if (override) want = override.decision === "keep" ? "keep" : actionFor("ad", 1, settings.actions);
+          if (override) want = override.decision === "keep" ? "keep" : actionFor("ad", 1, actions());
           else if (scores) {
             fromModel = true;
             want = scoreAction(scores);
@@ -386,11 +387,16 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         // claim is only committed below, the verdict that was not applied takes none.
         continue;
       }
-      // Placement may blur a visible item, never reveal one already collapsed.
-      let action = el.getAttribute("data-jev") === "hide" && want === "hide"
+      // Placement may cover a visible item, never reveal one already collapsed - and an item
+      // that was ever on screen (blurred or covered) is never collapsed later, only covered.
+      const current = el.getAttribute("data-jev");
+      let action = current === "hide" && want === "hide"
         ? "hide"
         : placement(want, { pageHasPainted: painted, top, viewportHeight: innerHeight });
-      if (el.getAttribute("data-jev") === "blur" && action === "hide") action = "blur";
+      if ((current === "blur" || current === "cover") && action === "hide") action = "cover";
+      // A model verdict is never certain: on screen it stays a blur with the yes/no prompt, and
+      // only the user's "yes" (an override, not a model verdict) turns it into a cover.
+      if (model && action === "cover") action = "blur";
       if (action === "keep") el.removeAttribute("data-jev");
       else el.setAttribute("data-jev", action);
       // The prompt belongs to a MODEL verdict that the placement rule BLURRED, and to nothing

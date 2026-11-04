@@ -1,9 +1,7 @@
-import type { Action, Category, ProviderId, Settings, SiteId } from "./types";
+import type { ProviderId, Settings, SiteId } from "./types";
 
 const SITE_IDS: SiteId[] = ["youtube", "x", "instagram", "linkedin"];
-const CATEGORIES: Category[] = ["ad", "suggested", "module"];
 const PROVIDERS: ProviderId[] = ["openai", "typesafe"];
-const ACTIONS: Action[] = ["keep", "blur", "hide"];
 
 export const DEFAULT_SETTINGS: Settings = {
   provider: "openai",
@@ -15,7 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
     instagram: { enabled: true },
     linkedin: { enabled: true }
   },
-  actions: { ad: "hide", suggested: "hide", module: "hide" }
+  hideSuggested: true
 };
 
 export const sigKey = (site: SiteId): string => `sig:${site}`;
@@ -43,22 +41,20 @@ const mergeProvider = (
 function normalizeSettings(saved: unknown): Settings {
   const raw: Unknown = isRecord(saved) ? saved : {};
   const sitesRaw = isRecord(raw.sites) ? raw.sites : {};
-  const actionsRaw = isRecord(raw.actions) ? raw.actions : {};
   const sites = {} as Settings["sites"];
   for (const id of SITE_IDS) {
     const entry = sitesRaw[id];
     sites[id] = { enabled: isRecord(entry) ? entry.enabled !== false : DEFAULT_SETTINGS.sites[id].enabled };
   }
-  const actions = {} as Settings["actions"];
-  for (const category of CATEGORIES) {
-    actions[category] = pick(actionsRaw[category], ACTIONS, DEFAULT_SETTINGS.actions[category]);
-  }
+  // Settings saved before hideSuggested existed carry per-category actions: "keep" on suggested meant off.
+  const legacy = isRecord(raw.actions) ? raw.actions.suggested : undefined;
+  const hideSuggested = typeof raw.hideSuggested === "boolean" ? raw.hideSuggested : legacy !== "keep";
   return {
     provider: pick(raw.provider, PROVIDERS, DEFAULT_SETTINGS.provider),
     openai: mergeProvider(raw.openai, DEFAULT_SETTINGS.openai),
     typesafe: mergeProvider(raw.typesafe, DEFAULT_SETTINGS.typesafe),
     sites,
-    actions
+    hideSuggested
   };
 }
 

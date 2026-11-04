@@ -20,10 +20,8 @@
   function progress() { window.dispatchEvent(new Event("qa-progress")); }
 
   var settings = JSON.parse(JSON.stringify(H.DEFAULT_SETTINGS));
-  ["ad", "suggested", "module"].forEach(function (c) {
-    var v = q.get(c);
-    if (v === "keep" || v === "blur" || v === "hide") settings.actions[c] = v;
-  });
+  // Ads are always hidden; recommendations (posts and modules) share one switch.
+  if (q.get("suggested") === "keep" || q.get("module") === "keep") settings.hideSuggested = false;
   if (q.get("siteEnabled") === "false") settings.sites[site].enabled = false;
 
   var store = { settings: settings };

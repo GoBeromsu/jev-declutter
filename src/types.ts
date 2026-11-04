@@ -1,8 +1,10 @@
 export type SiteId = "youtube" | "x" | "instagram" | "linkedin";
 
-export type Action = "keep" | "blur" | "hide";
+/** keep/blur/hide are verdicts. "cover" is only ever applied: a hide placed where collapsing would move the page. */
+export type Action = "keep" | "blur" | "cover" | "hide";
 
-export type Category = "ad" | "suggested" | "module";
+/** Who put the item in the feed: an advertiser, or the platform's recommender. What I follow is neither. */
+export type Category = "ad" | "suggested";
 
 export type ProviderId = "openai" | "typesafe";
 
@@ -11,7 +13,8 @@ export interface Settings {
   openai: { apiKey: string; model: string };
   typesafe: { apiKey: string; model: string };
   sites: Record<SiteId, { enabled: boolean }>;
-  actions: Record<Category, Action>;
+  /** Ads are always hidden; recommendations (single posts and modules alike) are hidden only when this is on. */
+  hideSuggested: boolean;
 }
 
 /** Structure and UI-chrome labels only: no post text ever enters this shape. */

@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { actionFor, combine, ITEM_CSS, placement, today } from "../src/decide";
+import { actionFor, actionsOf, combine, ITEM_CSS, placement, today } from "../src/decide";
 import type { Action, Category } from "../src/types";
 
-const DEFAULT_ACTIONS: Record<Category, Action> = { ad: "hide", suggested: "hide", module: "hide" };
-const ALL_KEEP: Record<Category, Action> = { ad: "keep", suggested: "keep", module: "keep" };
+const DEFAULT_ACTIONS: Record<Category, Action> = { ad: "hide", suggested: "hide" };
+const ALL_KEEP: Record<Category, Action> = { ad: "keep", suggested: "keep" };
 
 test("today uses the local calendar day", () => {
   expect(today(new Date(2026, 0, 5, 23, 59))).toBe("2026-01-05");
@@ -29,21 +29,19 @@ test("actionFor: thresholds pick settings action, blur, keep", () => {
 
 test("actionFor: settings keep wins over every probability", () => {
   expect(actionFor("suggested", 0.95, ALL_KEEP)).toBe("keep");
-  expect(actionFor("module", 0.6, ALL_KEEP)).toBe("keep");
-  expect(actionFor("ad", 0.95, { ad: "blur", suggested: "hide", module: "hide" })).toBe("blur");
-  expect(actionFor("ad", 0.95, { ad: "keep", suggested: "keep", module: "hide" })).toBe("keep");
+  expect(actionFor("ad", 0.6, ALL_KEEP)).toBe("keep");
 });
 
-test("actionFor: each category reads its own setting", () => {
-  const actions: Record<Category, Action> = { ad: "hide", suggested: "blur", module: "keep" };
-  expect(actionFor("ad", 0.9, actions)).toBe("hide");
-  expect(actionFor("suggested", 0.9, actions)).toBe("blur");
-  expect(actionFor("module", 0.9, actions)).toBe("keep");
+test("actionsOf: ads are always hidden, recommendations follow the one switch", () => {
+  expect(actionsOf(true)).toEqual({ ad: "hide", suggested: "hide" });
+  expect(actionsOf(false)).toEqual({ ad: "hide", suggested: "keep" });
+  expect(actionFor("suggested", 0.9, actionsOf(false))).toBe("keep");
+  expect(actionFor("ad", 0.9, actionsOf(false))).toBe("hide");
 });
 
 test("combine: hide > blur > keep, in any order", () => {
-  const all: Action[] = ["keep", "blur", "hide"];
-  const rank: Record<Action, number> = { keep: 0, blur: 1, hide: 2 };
+  const all: Action[] = ["keep", "blur", "cover", "hide"];
+  const rank: Record<Action, number> = { keep: 0, blur: 1, cover: 2, hide: 3 };
   for (const a of all) {
     for (const b of all) {
       expect(combine(a, b)).toBe(rank[a] >= rank[b] ? a : b);
@@ -59,9 +57,9 @@ test("placement: page not painted, in viewport hide -> hide", () => {
   expect(placement("hide", pos(false, 0))).toBe("hide");
 });
 
-test("placement: page painted, in viewport hide -> blur", () => {
-  expect(placement("hide", pos(true, 100))).toBe("blur");
-  expect(placement("hide", pos(true, 0))).toBe("blur");
+test("placement: page painted, in viewport hide -> cover", () => {
+  expect(placement("hide", pos(true, 100))).toBe("cover");
+  expect(placement("hide", pos(true, 0))).toBe("cover");
 });
 
 test("placement: page painted, top >= viewport height -> hide", () => {
@@ -69,13 +67,13 @@ test("placement: page painted, top >= viewport height -> hide", () => {
   expect(placement("hide", pos(true, 5000))).toBe("hide");
 });
 
-test("placement: boundary painted top = vh - 1 -> blur", () => {
-  expect(placement("hide", pos(true, 799))).toBe("blur");
+test("placement: boundary painted top = vh - 1 -> cover", () => {
+  expect(placement("hide", pos(true, 799))).toBe("cover");
 });
 
-test("placement: page painted, above viewport -> blur", () => {
-  expect(placement("hide", pos(true, -1))).toBe("blur");
-  expect(placement("hide", pos(true, -3000))).toBe("blur");
+test("placement: page painted, above viewport -> cover", () => {
+  expect(placement("hide", pos(true, -1))).toBe("cover");
+  expect(placement("hide", pos(true, -3000))).toBe("cover");
 });
 
 test("placement: page not painted, above viewport -> hide", () => {
@@ -86,20 +84,20 @@ test("placement: keep stays keep, blur stays blur", () => {
   for (const painted of [true, false]) {
     for (const top of [-500, 0, 100, 799, 800, 5000]) {
       expect(placement("keep", pos(painted, top))).toBe("keep");
-      expect(placement("blur", pos(painted, top))).toBe("blur");
+      expect(placement("cover", pos(painted, top))).toBe("cover");
     }
   }
 });
 
 test("placement: NaN top never hides, even before first paint", () => {
-  expect(placement("hide", pos(true, Number.NaN))).toBe("blur");
-  expect(placement("hide", pos(false, Number.NaN))).toBe("blur");
-  expect(placement("hide", pos(true, 100, Number.NaN))).toBe("blur");
+  expect(placement("hide", pos(true, Number.NaN))).toBe("cover");
+  expect(placement("hide", pos(false, Number.NaN))).toBe("cover");
+  expect(placement("hide", pos(true, 100, Number.NaN))).toBe("cover");
 });
 
 test("placement: negative top with nonsense viewport is never trusted to be off-screen", () => {
-  expect(placement("hide", pos(true, -1, -1))).toBe("blur");
-  expect(placement("hide", pos(true, -100, 800))).toBe("blur");
+  expect(placement("hide", pos(true, -1, -1))).toBe("cover");
+  expect(placement("hide", pos(true, -100, 800))).toBe("cover");
 });
 
 test("ITEM_CSS targets both treatment attributes and nothing else", () => {

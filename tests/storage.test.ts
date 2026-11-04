@@ -34,15 +34,24 @@ test("defaults match the plan", () => {
     instagram: { enabled: true },
     linkedin: { enabled: true }
   });
-  expect(DEFAULT_SETTINGS.actions).toEqual({ ad: "hide", suggested: "hide", module: "hide" });
+  expect(DEFAULT_SETTINGS.hideSuggested).toBe(true);
 });
 
 test("partial saved settings are deep-merged over the defaults", async () => {
-  store.settings = { provider: "typesafe", actions: { ad: "blur" } };
+  store.settings = { provider: "typesafe" };
   const s = await loadSettings();
   expect(s.provider).toBe("typesafe");
-  expect(s.actions).toEqual({ ad: "blur", suggested: "hide", module: "hide" });
+  expect(s.hideSuggested).toBe(true);
   expect(s.sites.youtube).toEqual({ enabled: true });
+});
+
+test("legacy per-category actions map onto the one recommendations switch", async () => {
+  store.settings = { actions: { ad: "keep", suggested: "keep", module: "hide" } };
+  expect((await loadSettings()).hideSuggested).toBe(false);
+  store.settings = { actions: { suggested: "blur" } };
+  expect((await loadSettings()).hideSuggested).toBe(true);
+  store.settings = { hideSuggested: false, actions: { suggested: "hide" } };
+  expect((await loadSettings()).hideSuggested).toBe(false);
 });
 
 test("a missing site keeps its default enabled state", async () => {

@@ -86,7 +86,7 @@ const FULL: Settings = {
     instagram: { enabled: true },
     linkedin: { enabled: false }
   },
-  actions: { ad: "hide", suggested: "blur", module: "keep" }
+  hideSuggested: false
 };
 
 const cacheOf = (day: string, providerKey: string, entries: Record<string, unknown>, order: unknown = Object.keys(entries)) => ({
@@ -113,12 +113,15 @@ test("markup: lang=ko, masked key fields, no remote assets, no free-text goal fi
   expect(HTML).not.toMatch(/https?:\/\//);
   expect(HTML).not.toMatch(/@import/);
   expect(HTML).not.toMatch(/url\(/);
-  expect(Array.from(doc.querySelectorAll<HTMLInputElement>('input[name="provider"]')).map((r) => r.value)).toEqual(["openai", "typesafe"]);
-  for (const site of SITES) expect(input(doc, `site-${site}`).type).toBe("checkbox");
-  for (const category of ["ad", "suggested", "module"]) {
-    const values = Array.from(select(doc, `action-${category}`).querySelectorAll("option")).map((o) => o.value);
-    expect(values).toEqual(["hide", "blur", "keep"]);
+  expect(Array.from(select(doc, "model").options).map((o) => o.value)).toEqual(["openai:gpt-6-luna", "typesafe:jev-latest"]);
+  for (const site of SITES) {
+    expect(input(doc, `site-${site}`).type).toBe("checkbox");
+    // Icon-only, but still named for screen readers.
+    expect(input(doc, `site-${site}`).closest("label")?.textContent?.trim()).not.toBe("");
   }
+  expect(input(doc, "hide-suggested").type).toBe("checkbox");
+  // Ads are always hidden: there is no control for them.
+  expect(doc.querySelectorAll('[id^="action-"]').length).toBe(0);
 });
 
 test("the untouched page collects to DEFAULT_SETTINGS", () => {
@@ -127,57 +130,47 @@ test("the untouched page collects to DEFAULT_SETTINGS", () => {
 
 test("collectForm maps every control into an exact Settings object", () => {
   const doc = page();
-  input(doc, "provider-typesafe").checked = true;
+  populateForm({ ...DEFAULT_SETTINGS, openai: { apiKey: "", model: "gpt-6-luna-mini" }, typesafe: { apiKey: "", model: "jev-1.14.0" } }, doc);
+  select(doc, "model").value = "typesafe:jev-1.14.0";
   input(doc, "openai-key").value = "  sk-openai  ";
-  input(doc, "openai-model").value = " gpt-6-luna-mini ";
   input(doc, "typesafe-key").value = "ts-key";
-  input(doc, "typesafe-model").value = "jev-1.14.0";
   input(doc, "site-youtube").checked = true;
   input(doc, "site-x").checked = false;
   input(doc, "site-instagram").checked = true;
   input(doc, "site-linkedin").checked = false;
-  select(doc, "action-ad").value = "hide";
-  select(doc, "action-suggested").value = "blur";
-  select(doc, "action-module").value = "keep";
+  input(doc, "hide-suggested").checked = false;
 
   const collected = collectForm(doc);
   expect(collected).toStrictEqual(FULL);
-  expect(Object.keys(collected).sort()).toEqual(["actions", "openai", "provider", "sites", "typesafe"]);
+  expect(Object.keys(collected).sort()).toEqual(["hideSuggested", "openai", "provider", "sites", "typesafe"]);
   expect(Object.keys(collected.sites)).toEqual(SITES);
-  expect(Object.keys(collected.actions)).toEqual(["ad", "suggested", "module"]);
 });
 
-test("an empty or blank model field falls back to that provider's default, never an empty string", () => {
+test("the model dropdown picks the provider; a missing model falls back to that provider's default", () => {
   const doc = page();
-  input(doc, "openai-model").value = "";
-  input(doc, "typesafe-model").value = "   ";
+  select(doc, "model").value = "typesafe:jev-latest";
+  expect(collectForm(doc).provider).toBe("typesafe");
+  const forced = doc.createElement("option");
+  forced.value = "bogus";
+  select(doc, "model").append(forced);
+  select(doc, "model").value = "bogus";
   const s = collectForm(doc);
+  expect(s.provider).toBe(DEFAULT_SETTINGS.provider);
   expect(s.openai.model).toBe(DEFAULT_SETTINGS.openai.model);
   expect(s.typesafe.model).toBe(DEFAULT_TYPESAFE_MODEL);
-  expect(DEFAULT_SETTINGS.openai.model).toBe("gpt-6-luna");
-  expect(DEFAULT_TYPESAFE_MODEL).toBe("jev-latest");
 });
 
-test("malformed input: a select forced to an unknown value collects as that category's default", () => {
-  const doc = page();
-  select(doc, "action-suggested").value = "bogus";
-  expect(select(doc, "action-suggested").value).toBe("");
-  expect(collectForm(doc).actions).toStrictEqual(DEFAULT_SETTINGS.actions);
-});
-
-test("populateForm then collectForm round-trips a full Settings object", () => {
+test("populateForm then collectForm round-trips a full Settings object, keeping unlisted saved models", () => {
   const doc = page();
   populateForm(FULL, doc);
-  expect(input(doc, "provider-typesafe").checked).toBe(true);
-  expect(input(doc, "provider-openai").checked).toBe(false);
+  expect(select(doc, "model").value).toBe("typesafe:jev-1.14.0");
   expect(input(doc, "openai-key").value).toBe("sk-openai");
   expect(input(doc, "site-x").checked).toBe(false);
-  expect(select(doc, "action-module").value).toBe("keep");
+  expect(input(doc, "hide-suggested").checked).toBe(false);
   expect(collectForm(doc)).toStrictEqual(FULL);
 
   populateForm(DEFAULT_SETTINGS, doc);
-  expect(input(doc, "provider-openai").checked).toBe(true);
-  expect(input(doc, "provider-typesafe").checked).toBe(false);
+  expect(select(doc, "model").value).toBe("openai:gpt-6-luna");
   expect(collectForm(doc)).toStrictEqual(DEFAULT_SETTINGS);
 });
 
@@ -273,8 +266,8 @@ test("main(): partial, legacy and garbage stored settings populate the form from
     ["nope", DEFAULT_SETTINGS],
     [{ apiKey: "sk-old", model: "jev-latest", goals: { youtube: "less noise" } }, DEFAULT_SETTINGS],
     [
-      { provider: "typesafe", sites: { x: { enabled: false } }, actions: { module: "keep" } },
-      { ...DEFAULT_SETTINGS, provider: "typesafe", sites: { ...DEFAULT_SETTINGS.sites, x: { enabled: false } }, actions: { ...DEFAULT_SETTINGS.actions, module: "keep" } }
+      { provider: "typesafe", sites: { x: { enabled: false } }, actions: { suggested: "keep" } },
+      { ...DEFAULT_SETTINGS, provider: "typesafe", sites: { ...DEFAULT_SETTINGS.sites, x: { enabled: false } }, hideSuggested: false }
     ]
   ];
   for (const [stored, expected] of cases) {
@@ -286,7 +279,7 @@ test("main(): partial, legacy and garbage stored settings populate the form from
     const doc = page();
     await main(doc);
     expect(collectForm(doc)).toStrictEqual(expected);
-    expect(input(doc, "provider-typesafe").checked).toBe(expected.provider === "typesafe");
+    expect(select(doc, "model").value.startsWith(`${expected.provider}:`)).toBe(true);
     expect(rowsOf(doc, "x").map((r) => cells(r))).toEqual([
       ["ok", "0.90", "-"],
       ["broken", "-", "-"]
@@ -351,14 +344,13 @@ test("submitting the form saves the collected Settings under 'settings' and re-r
   const doc = page();
   await main(doc);
   populateForm(FULL, doc);
-  input(doc, "openai-model").value = "";
 
   const state = await nextState(doc, () => {
     $<HTMLFormElement>(doc, "settings").dispatchEvent(new Event("submit", { cancelable: true }));
   });
   expect(state).toBe("saved");
-  expect(store.settings).toStrictEqual({ ...FULL, openai: { ...FULL.openai, model: DEFAULT_SETTINGS.openai.model } });
-  expect(input(doc, "openai-model").value).toBe(DEFAULT_SETTINGS.openai.model);
+  expect(store.settings).toStrictEqual(FULL);
+  expect(select(doc, "model").value).toBe("typesafe:jev-1.14.0");
   expect(sent).toEqual([]);
   expect($<HTMLElement>(doc, "diag-youtube").dataset.stale).toBe("false");
 });

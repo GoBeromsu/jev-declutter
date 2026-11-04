@@ -102,7 +102,6 @@
       color: var(--color-accent);
     }
     h1 { margin: var(--space-1) 0 0; font-size: var(--text-xl); line-height: 1.1; letter-spacing: -0.02em; }
-    .lede { margin: 0; max-width: 56ch; color: var(--color-ink-2); }
 
     .card {
       display: grid;
@@ -119,35 +118,6 @@
     .card > header p { margin: 0; font-size: var(--text-sm); color: var(--color-ink-2); }
     .card > .body { display: grid; align-content: start; gap: var(--space-4); min-width: 0; }
 
-    .provider {
-      display: grid;
-      gap: var(--space-4);
-      padding: var(--space-4);
-      border: var(--line) solid var(--color-line);
-      border-radius: var(--radius-sm);
-      background: var(--color-surface-2);
-      transition: border-color var(--ease), background-color var(--ease);
-    }
-    .provider-head { display: flex; align-items: center; gap: var(--space-2); }
-    .choice { display: inline-flex; align-items: center; gap: var(--space-2); font-weight: 700; cursor: pointer; }
-    .badge {
-      display: none;
-      align-items: center;
-      font-size: var(--text-xs);
-      font-weight: 700;
-      line-height: 1.4;
-      padding: 2px var(--space-2);
-      border-radius: var(--radius-pill);
-      background: var(--color-accent);
-      color: var(--color-accent-ink);
-    }
-    form:has(#provider-openai:checked) .provider-openai,
-    form:has(#provider-typesafe:checked) .provider-typesafe { border-color: var(--color-accent); background: var(--color-surface); }
-    form:has(#provider-openai:checked) .provider-openai .badge,
-    form:has(#provider-typesafe:checked) .provider-typesafe .badge { display: inline-flex; }
-
-    .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
-    .grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-4); }
     .field { display: grid; gap: var(--space-1); min-width: 0; }
     .field > label { font-size: var(--text-sm); font-weight: 600; color: var(--color-ink-2); }
     .field > .hint { font-size: var(--text-xs); color: var(--color-ink-3); }
@@ -249,13 +219,26 @@
     @media (max-width: 720px) {
       .page { padding: var(--space-5) var(--space-4); }
       .masthead, .card { grid-template-columns: 1fr; gap: var(--space-4); }
-      .grid-2, .grid-3 { grid-template-columns: 1fr; }
-      .check-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (prefers-reduced-motion: no-preference) {
       .masthead, .card { animation: rise 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 70ms); }
       @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
     }
+    form:has(#model option[value^="openai:"]:checked) .key-typesafe,
+    form:has(#model option[value^="typesafe:"]:checked) .key-openai { display: none; }
+    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+    .check { justify-content: center; position: relative; }
+    .check input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .check svg { width: 26px; height: 26px; color: var(--color-ink-3); transition: color var(--ease); }
+    .check:has(input:checked) svg { color: var(--color-ink); }
+    .check:has(input:focus-visible) { box-shadow: var(--focus-ring); }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: var(--control-height); font-weight: 600; }
+    .row.locked { color: var(--color-ink-2); }
+    .switch { appearance: none; width: 40px !important; height: 22px !important; border-radius: var(--radius-pill); background: var(--color-line-2); position: relative; cursor: pointer; transition: background-color var(--ease); }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--color-surface); transition: transform var(--ease); }
+    .switch:checked { background: var(--color-accent); }
+    .switch:checked::after { transform: translateX(18px); }
+    .switch:focus-visible { outline: none; box-shadow: var(--focus-ring); }
   </style>
 </head>
 <body>
@@ -265,106 +248,45 @@
         <p class="brand">Jev Declutter</p>
         <h1>설정</h1>
       </div>
-      <p class="lede">광고와 팔로우하지 않는 계정의 추천 항목을 화면에 그려지기 전에 치웁니다. 바꾼 설정과 캐시 비우기는 다음 페이지 이동부터 적용됩니다.</p>
     </header>
 
     <form id="settings" novalidate>
-      <section class="card" style="--i: 1" aria-labelledby="h-provider">
-        <header>
-          <h2 id="h-provider">판정 제공자</h2>
-          <p>모델에는 게시물 본문이 아니라 피드 항목의 구조와 UI 라벨만 보냅니다.</p>
-        </header>
+      <section class="card" style="--i: 1" aria-labelledby="h-model">
+        <header><h2 id="h-model">모델</h2></header>
         <div class="body">
-          <div class="provider provider-openai">
-            <div class="provider-head">
-              <label class="choice"><input type="radio" name="provider" id="provider-openai" value="openai" checked /> OpenAI Decisions</label>
-              <span class="badge">사용 중</span>
-            </div>
-            <div class="grid-2">
-              <div class="field">
-                <label for="openai-key">OpenAI API 키</label>
-                <input id="openai-key" type="password" autocomplete="off" spellcheck="false" />
-              </div>
-              <div class="field">
-                <label for="openai-model">모델</label>
-                <input id="openai-model" type="text" autocomplete="off" spellcheck="false" placeholder="gpt-6-luna" />
-                <span class="hint">비우면 gpt-6-luna</span>
-              </div>
-            </div>
+          <select id="model" aria-labelledby="h-model">
+            <option value="openai:gpt-6-luna">OpenAI · gpt-6-luna</option>
+            <option value="typesafe:jev-latest">Jev · jev-latest</option>
+          </select>
+          <div class="field key-openai">
+            <label for="openai-key">OpenAI API 키</label>
+            <input id="openai-key" type="password" autocomplete="off" spellcheck="false" />
           </div>
-
-          <div class="provider provider-typesafe">
-            <div class="provider-head">
-              <label class="choice"><input type="radio" name="provider" id="provider-typesafe" value="typesafe" /> TypeSafe Jev</label>
-              <span class="badge">사용 중</span>
-            </div>
-            <div class="grid-2">
-              <div class="field">
-                <label for="typesafe-key">TypeSafe API 키</label>
-                <input id="typesafe-key" type="password" autocomplete="off" spellcheck="false" />
-              </div>
-              <div class="field">
-                <label for="typesafe-model">모델</label>
-                <input id="typesafe-model" type="text" autocomplete="off" spellcheck="false" placeholder="jev-latest" />
-                <span class="hint">비우면 jev-latest</span>
-              </div>
-            </div>
+          <div class="field key-typesafe">
+            <label for="typesafe-key">Jev API 키</label>
+            <input id="typesafe-key" type="password" autocomplete="off" spellcheck="false" />
           </div>
-
-          <p class="note">API 키는 이 브라우저 프로필의 chrome.storage.local에 암호화 없이 저장됩니다. 개인용 전제입니다.</p>
+          <p class="note">키는 이 프로필에 평문 저장 · 모델에는 구조와 UI 라벨만 전송</p>
         </div>
       </section>
 
       <section class="card" style="--i: 2" aria-labelledby="h-sites">
-        <header>
-          <h2 id="h-sites">사이트</h2>
-          <p>끄면 그 사이트에서는 아무것도 읽거나 숨기지 않습니다.</p>
-        </header>
+        <header><h2 id="h-sites">사이트</h2></header>
         <div class="body">
           <div class="check-grid">
-            <label class="check"><input type="checkbox" id="site-youtube" checked /> YouTube</label>
-            <label class="check"><input type="checkbox" id="site-x" checked /> X</label>
-            <label class="check"><input type="checkbox" id="site-instagram" checked /> Instagram</label>
-            <label class="check"><input type="checkbox" id="site-linkedin" checked /> LinkedIn</label>
+            <label class="check" title="YouTube"><input type="checkbox" id="site-youtube" checked /><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="4" fill="currentColor"/><path d="M10 9v6l5-3z" fill="var(--color-surface)"/></svg><span class="sr">YouTube</span></label>
+            <label class="check" title="X"><input type="checkbox" id="site-x" checked /><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4l16 16M20 4L4 20" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span class="sr">X</span></label>
+            <label class="check" title="Instagram"><input type="checkbox" id="site-instagram" checked /><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.3" cy="6.7" r="1" fill="currentColor" stroke="none"/></svg><span class="sr">Instagram</span></label>
+            <label class="check" title="LinkedIn"><input type="checkbox" id="site-linkedin" checked /><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="2" width="20" height="20" rx="4" fill="currentColor"/><path d="M7 10v7M7 7v.01M11 17v-7m0 3.5a3 3 0 0 1 6 0V17" stroke="var(--color-surface)" stroke-width="2.2" stroke-linecap="round" fill="none"/></svg><span class="sr">LinkedIn</span></label>
           </div>
         </div>
       </section>
 
-      <section class="card" style="--i: 3" aria-labelledby="h-actions">
-        <header>
-          <h2 id="h-actions">항목별 처리</h2>
-          <p>확실한 신호가 있거나 모델 확률이 0.8 이상이면 고른 처리를, 0.5 이상 0.8 미만이면 블러를 적용합니다.</p>
-        </header>
+      <section class="card" style="--i: 3" aria-labelledby="h-feed">
+        <header><h2 id="h-feed">피드</h2></header>
         <div class="body">
-          <div class="grid-3">
-            <div class="field">
-              <label for="action-ad">광고</label>
-              <select id="action-ad">
-                <option value="hide">숨김</option>
-                <option value="blur">블러</option>
-                <option value="keep">유지</option>
-              </select>
-              <span class="hint">스폰서·프로모션·광고 표시 항목</span>
-            </div>
-            <div class="field">
-              <label for="action-suggested">추천 게시물</label>
-              <select id="action-suggested">
-                <option value="hide">숨김</option>
-                <option value="blur">블러</option>
-                <option value="keep">유지</option>
-              </select>
-              <span class="hint">팔로우하지 않는 계정의 항목</span>
-            </div>
-            <div class="field">
-              <label for="action-module">추천 모듈</label>
-              <select id="action-module">
-                <option value="hide">숨김</option>
-                <option value="blur">블러</option>
-                <option value="keep">유지</option>
-              </select>
-              <span class="hint">Shorts, Reels, 트렌드, 팔로우 추천, LinkedIn 뉴스</span>
-            </div>
-          </div>
+          <div class="row locked"><span>광고</span><span class="tag tag-none">항상 숨김</span></div>
+          <label class="row"><span>추천 · 팔로우하지 않은 계정</span><input type="checkbox" id="hide-suggested" class="switch" checked /></label>
         </div>
       </section>
 
@@ -378,7 +300,7 @@
     <section class="card" style="--i: 4" aria-labelledby="h-diag">
       <header>
         <h2 id="h-diag">오늘의 판정</h2>
-        <p>사이트별 서명 캐시와 모델 요청 예산입니다. 캐시 키는 구조 서명이라 게시물 내용을 담지 않습니다.</p>
+        <p>모델 요청 예산과 사이트별 판정 캐시</p>
       </header>
       <div class="body">
         <p id="budget" class="budget"></p>
@@ -389,7 +311,7 @@
     <section class="card" style="--i: 5" aria-labelledby="h-overrides">
       <header>
         <h2 id="h-overrides">직접 응답</h2>
-        <p>흐리게 처리된 항목 위에서 “예 / 아니오”를 눌렀던 기록입니다. 날마다 지워지지 않으며, 모델 판정보다 우선합니다. 키는 구조 서명이라 게시물 내용을 담지 않습니다.</p>
+        <p>블러 위에서 누른 예 / 아니오. 모델 판정보다 우선합니다.</p>
       </header>
       <div class="body">
         <p id="override-summary" class="budget"></p>

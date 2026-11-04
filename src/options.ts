@@ -3,14 +3,13 @@ import { today } from "./decide";
 import { clearOverride, clearOverrides, loadOverrides, type OverrideDecision, type OverrideMap } from "./overrides";
 import { DEFAULT_TYPESAFE_MODEL } from "./providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, loadSettings } from "./storage";
-import type { Action, Category, Message, ProviderId, Settings, SiteId } from "./types";
+import type { Message, ProviderId, Settings, SiteId } from "./types";
 
 export const SITE_IDS: readonly SiteId[] = ["youtube", "x", "instagram", "linkedin"];
-const CATEGORIES: readonly Category[] = ["ad", "suggested", "module"];
-const ACTIONS: readonly Action[] = ["hide", "blur", "keep"];
 const PROVIDERS: readonly ProviderId[] = ["openai", "typesafe"];
 
 const SITE_LABELS: Record<SiteId, string> = { youtube: "YouTube", x: "X", instagram: "Instagram", linkedin: "LinkedIn" };
+const PROVIDER_LABELS: Record<ProviderId, string> = { openai: "OpenAI", typesafe: "Jev" };
 
 const DEFAULT_MODEL: Record<ProviderId, string> = {
   openai: DEFAULT_SETTINGS.openai.model,
@@ -42,40 +41,53 @@ function $<T extends Element>(root: ParentNode, id: string): T {
 }
 
 const input = (root: ParentNode, id: string) => $<HTMLInputElement>(root, id);
-const select = (root: ParentNode, id: string) => $<HTMLSelectElement>(root, id);
-const radios = (root: ParentNode) => Array.from(root.querySelectorAll<HTMLInputElement>('input[name="provider"]'));
+const modelSelect = (root: ParentNode) => $<HTMLSelectElement>(root, "model");
 
-const modelOf = (raw: string, provider: ProviderId): string => raw.trim() || DEFAULT_MODEL[provider];
+/** One dropdown picks provider and model together: each option's value is `provider:model`. */
+function parseModel(value: string): { provider: ProviderId; model: string } {
+  const at = value.indexOf(":");
+  const provider = oneOf(at < 0 ? "" : value.slice(0, at), PROVIDERS, DEFAULT_SETTINGS.provider);
+  const model = at < 0 ? "" : value.slice(at + 1).trim();
+  return { provider, model: model || DEFAULT_MODEL[provider] };
+}
 
-function providerOf(root: ParentNode): ProviderId {
-  const checked = radios(root).find((r) => r.checked);
-  return checked ? oneOf(checked.value, PROVIDERS, DEFAULT_SETTINGS.provider) : DEFAULT_SETTINGS.provider;
+/** A saved model the dropdown does not list yet (set before the dropdown existed) is kept as its own option. */
+function ensureOption(select: HTMLSelectElement, provider: ProviderId, model: string): void {
+  const value = `${provider}:${model}`;
+  if (Array.from(select.options).some((o) => o.value === value)) return;
+  const option = (select.ownerDocument ?? document).createElement("option");
+  option.value = value;
+  option.textContent = `${PROVIDER_LABELS[provider]} · ${model}`;
+  select.append(option);
 }
 
 export function collectForm(root: ParentNode = document): Settings {
   const sites = {} as Settings["sites"];
   for (const site of SITE_IDS) sites[site] = { enabled: input(root, `site-${site}`).checked };
-  const actions = {} as Settings["actions"];
-  for (const category of CATEGORIES) {
-    actions[category] = oneOf(select(root, `action-${category}`).value, ACTIONS, DEFAULT_SETTINGS.actions[category]);
-  }
+  const select = modelSelect(root);
+  const chosen = parseModel(select.value);
+  // The provider not chosen keeps the model it was saved with (populateForm notes it on the select).
+  const modelOf = (p: ProviderId) => (p === chosen.provider ? chosen.model : select.dataset[p] || DEFAULT_MODEL[p]);
   return {
-    provider: providerOf(root),
-    openai: { apiKey: input(root, "openai-key").value.trim(), model: modelOf(input(root, "openai-model").value, "openai") },
-    typesafe: { apiKey: input(root, "typesafe-key").value.trim(), model: modelOf(input(root, "typesafe-model").value, "typesafe") },
+    provider: chosen.provider,
+    openai: { apiKey: input(root, "openai-key").value.trim(), model: modelOf("openai") },
+    typesafe: { apiKey: input(root, "typesafe-key").value.trim(), model: modelOf("typesafe") },
     sites,
-    actions
+    hideSuggested: input(root, "hide-suggested").checked
   };
 }
 
 export function populateForm(settings: Settings, root: ParentNode = document): void {
-  for (const r of radios(root)) r.checked = r.value === settings.provider;
+  const select = modelSelect(root);
+  for (const p of PROVIDERS) {
+    ensureOption(select, p, settings[p].model);
+    select.dataset[p] = settings[p].model;
+  }
+  select.value = `${settings.provider}:${settings[settings.provider].model}`;
   input(root, "openai-key").value = settings.openai.apiKey;
-  input(root, "openai-model").value = settings.openai.model;
   input(root, "typesafe-key").value = settings.typesafe.apiKey;
-  input(root, "typesafe-model").value = settings.typesafe.model;
   for (const site of SITE_IDS) input(root, `site-${site}`).checked = settings.sites[site].enabled;
-  for (const category of CATEGORIES) select(root, `action-${category}`).value = settings.actions[category];
+  input(root, "hide-suggested").checked = settings.hideSuggested;
 }
 
 const score = (v: unknown): string => (typeof v === "number" && Number.isFinite(v) ? v.toFixed(2) : "-");
