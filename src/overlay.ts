@@ -42,16 +42,40 @@ export function promptLanguage(doc: Document, uiLanguage: string): "ko" | "en" {
   return tag.trim().toLowerCase().startsWith("ko") ? "ko" : "en";
 }
 
+export function hostColorScheme(doc: Document): "light" | "dark" | "light dark" {
+  const view = doc.defaultView;
+  for (const el of [doc.body, doc.documentElement]) {
+    if (!el || !view) continue;
+    const color = view.getComputedStyle(el).backgroundColor;
+    if (!color.startsWith("rgb")) continue;
+    const [r, g, b, a = 1] = color.match(/[\d.]+/g)?.map(Number) ?? [];
+    if (r === undefined || g === undefined || b === undefined || a < 0.5) continue;
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b < 128 ? "dark" : "light";
+  }
+  return "light dark";
+}
+
+const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+
 const CSS =
-  ".box{all:initial;display:inline-flex;align-items:center;gap:6px;box-sizing:border-box;max-width:100%;" +
-  "padding:3px 6px;border-radius:999px;background:rgba(17,17,17,.9);color:#fff;" +
-  "font:500 12px/1.4 system-ui,-apple-system,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.35)}" +
-  ".q{all:initial;color:#fff;font:500 12px/1.4 system-ui,-apple-system,sans-serif;white-space:nowrap;" +
-  "overflow:hidden;text-overflow:ellipsis}" +
-  "button{all:initial;cursor:pointer;padding:1px 8px;border-radius:999px;background:#fff;color:#111;" +
-  "font:600 12px/1.4 system-ui,-apple-system,sans-serif}" +
-  "button:hover{background:#dcdcdc}" +
-  "button:focus-visible{outline:2px solid #4c9ffe;outline-offset:1px}";
+  ".box,.q,button{all:initial;color-scheme:inherit}" +
+  ".box{--panel:light-dark(#fff,#22242c);--fg:light-dark(#282632,#eeedf4);--chrome:light-dark(#f0efec,#1e2027);" +
+  "--line:light-dark(#dedbe3,#3c3c49);--accent:light-dark(#7355b6,#c0a8fb);--accent-bg:light-dark(#ede7f7,#39304b);" +
+  "--accent-bg-hover:light-dark(#e2d9f3,#453a5b);--shadow:light-dark(#1d17201a,#00000036);" +
+  "display:inline-flex;align-items:center;gap:4px;box-sizing:border-box;max-width:100%;" +
+  "padding:4px 4px 4px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);" +
+  "box-shadow:0 2px 10px var(--shadow);animation:settle 180ms cubic-bezier(.2,.7,.2,1)}" +
+  `.q{margin-right:4px;color:var(--fg);font:500 12px/1.4 ${FONT};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}` +
+  `button{flex:none;cursor:pointer;padding:2px 9px;border:1px solid var(--line);border-radius:7px;background:var(--chrome);color:var(--fg);` +
+  `font:500 12px/1.4 ${FONT};transition:transform 120ms ease-out}` +
+  "button:hover{border-color:var(--fg)}" +
+  "button:active{transform:scale(.96)}" +
+  'button[data-answer="yes"]{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}' +
+  'button[data-answer="yes"]:hover{background:var(--accent-bg-hover)}' +
+  "button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}" +
+  "@keyframes settle{from{opacity:0;transform:translateY(2px) scale(.98)}to{opacity:1;transform:none}}" +
+  "@keyframes fade{from{opacity:0}to{opacity:1}}" +
+  "@media (prefers-reduced-motion:reduce){.box{animation:fade 120ms linear}button{transition:none}}";
 
 const SWALLOWED = [
   "click",
@@ -76,6 +100,7 @@ export function createOverlay(
   let sink = answer;
   let layer: HTMLElement | undefined;
   let frame = 0;
+  let colorScheme: ReturnType<typeof hostColorScheme> = "light dark";
   const prompts = new Map<Element, { host: HTMLElement; key: string; at: Placement }>();
 
   function ensureLayer(): HTMLElement {
@@ -88,6 +113,14 @@ export function createOverlay(
     (doc.body ?? doc.documentElement).append(next);
     layer = next;
     return next;
+  }
+
+  function fadeBackIn(item: Element) {
+    const reduced = doc.defaultView?.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    item.animate?.(
+      reduced ? [{ offset: 0, opacity: 0.4 }] : [{ offset: 0, opacity: 0.4, filter: "blur(10px)" }],
+      { duration: reduced ? 120 : 220, easing: "ease-out" }
+    );
   }
 
   function build(key: string): HTMLElement {
@@ -117,8 +150,12 @@ export function createOverlay(
       button.addEventListener("click", (event) => {
         event.preventDefault();
         const live = anchored(host);
+        const released = decision === "keep" ? [...prompts].find(([, prompt]) => prompt.host === host)?.[0] : undefined;
         remove(host);
-        if (live) sink(key, decision);
+        if (live) {
+          if (released?.getAttribute("data-jev") === "blur") fadeBackIn(released);
+          sink(key, decision);
+        }
       });
       box.append(button);
     }
@@ -191,6 +228,7 @@ export function createOverlay(
     },
     origin() {
       const rect = ensureLayer().getBoundingClientRect();
+      colorScheme = hostColorScheme(doc);
       return { top: rect.top, left: rect.left };
     },
     show(el, key, rect, origin) {
@@ -201,7 +239,7 @@ export function createOverlay(
       const at = place(rect, origin);
       host.style.cssText =
         `position:absolute;left:${at.left}px;top:${at.top}px;` +
-        `width:max-content;max-width:${at.maxWidth}px;pointer-events:auto;margin:0`;
+        `width:max-content;max-width:${at.maxWidth}px;pointer-events:auto;margin:0;color-scheme:${colorScheme}`;
       ensureLayer().append(host);
       prompts.set(el, { host, key, at });
       watch();

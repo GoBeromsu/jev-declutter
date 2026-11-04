@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { createOverlay, OVERLAY_LAYER_ID, promptLanguage } from "../src/overlay";
+import { createOverlay, hostColorScheme, OVERLAY_LAYER_ID, promptLanguage } from "../src/overlay";
 import type { OverrideDecision } from "../src/overrides";
 
 const built: { clear(): void }[] = [];
@@ -265,5 +265,46 @@ for (const how of ["moved", "detached"] as const) {
 
     expect(answers).toEqual([]);
     expect(hosts()).toHaveLength(0);
+  });
+}
+
+const painted = (body: string, html: string): Document => {
+  const doc = new DOMParser().parseFromString("<html><body></body></html>", "text/html");
+  const backgrounds: Record<string, string> = { BODY: body, HTML: html };
+  Object.defineProperty(doc, "defaultView", {
+    value: { getComputedStyle: (el: Element) => ({ backgroundColor: backgrounds[el.tagName] }) }
+  });
+  return doc;
+};
+
+test("hostColorScheme reads the host's painted background and falls back when it has none", () => {
+  const clear = "rgba(0, 0, 0, 0)";
+  expect(hostColorScheme(painted("rgb(0, 0, 0)", "rgb(255, 255, 255)"))).toBe("dark");
+  expect(hostColorScheme(painted("rgb(250, 250, 250)", "rgb(0, 0, 0)"))).toBe("light");
+  expect(hostColorScheme(painted(clear, "rgb(15, 15, 15)"))).toBe("dark");
+  expect(hostColorScheme(painted(clear, clear))).toBe("light dark");
+  expect(hostColorScheme(painted("oklch(0.2 0 0)", "oklch(0.2 0 0)"))).toBe("light dark");
+});
+
+test("a prompt takes the host's theme, read in the geometry phase", () => {
+  document.body.style.backgroundColor = "rgb(10, 10, 10)";
+  const { item, overlay } = fixture();
+  overlay.show(item, "k", RECT, overlay.origin());
+  expect((hosts()[0] as HTMLElement).style.colorScheme).toBe("dark");
+  document.body.style.backgroundColor = "";
+});
+
+for (const [answer, reveals] of [["no", 1], ["yes", 0]] as const) {
+  test(`answering ${answer} on a blurred item runs ${reveals} reveal animation`, () => {
+    const { item, overlay } = fixture();
+    item.setAttribute("data-jev", "blur");
+    const animations: unknown[] = [];
+    item.animate = ((...args: unknown[]) => {
+      animations.push(args);
+      return {} as Animation;
+    }) as typeof item.animate;
+    overlay.show(item, "k", RECT, ORIGIN);
+    button(hosts()[0] as HTMLElement, answer).click();
+    expect(animations).toHaveLength(reveals);
   });
 }
