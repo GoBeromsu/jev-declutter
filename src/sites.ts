@@ -3,6 +3,8 @@ import type { SiteId } from "./types";
 export interface SiteModule {
   selector: string;
   description: string;
+  paths?: RegExp;
+  blur?: true;
 }
 
 export interface SiteConfig {
@@ -81,8 +83,11 @@ export const SITES: Record<SiteId, SiteConfig> = {
     followMeansSuggested: true,
     modules: [
       { selector: 'div:has(> div > a[href="/explore/people/"])', description: "Suggested accounts module" },
-      { selector: 'a[href="/reels/"]', description: "Reels link in the navigation" },
-      { selector: 'a[href="/explore/"]', description: "Explore link in the navigation" }
+      { selector: 'a[href="/reels/"], a[href^="/reels/?"]', description: "Reels link in the navigation" },
+      { selector: 'a[href="/explore/"], a[href^="/explore/?"]', description: "Explore link in the navigation" },
+      { selector: 'div[role="presentation"]:has(> div > ul > li > div[role="button"][aria-label])', description: "Stories tray", blur: true },
+      { selector: "div:has(> div > div > button)", description: "Suggested account rows", paths: /^\/explore\/people/ },
+      { selector: 'div:has(> div > div > a[href^="/p/"])', description: "Explore tiles", paths: /^\/explore\/?$/ }
     ],
     excludedPaths: [/^\/direct/],
     feedPaths: [/^\/$/, /^\/explore/]

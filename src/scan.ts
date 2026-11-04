@@ -123,8 +123,13 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   let observedItems = 0;
   let observedSeen = new WeakSet<Element>();
   const priority = new Set<Element>();
-  const modules = cfg.modules.map((m) => m.selector).join(",");
-  const selector = [cfg.item, modules].filter(Boolean).join(",");
+  let modules = "";
+  let selector = "";
+  const route = () => {
+    modules = cfg.modules.filter((m) => !m.paths || m.paths.test(location.pathname)).map((m) => m.selector).join(",");
+    selector = [cfg.item, modules].filter(Boolean).join(",");
+  };
+  route();
   const qa = { processed: 0, observedItems: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
   const excluded = () => cfg.excludedPaths.some((re) => re.test(location.pathname));
   const active = () => !stopped && !excluded() && settings.sites[cfg.id].enabled;
@@ -182,6 +187,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   function navigation() {
     if (path === location.pathname) return;
     path = location.pathname;
+    route();
     generation++;
     queue.clear(); inflight.clear(); answers.clear(); pending.clear(); applyRO.disconnect(); nearIO.disconnect();
     releaseReadingHold();
@@ -346,7 +352,8 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       let chargeKey: string | undefined;
       let fromModel = false;
       if (isModule) {
-        key = "module"; want = actions().suggested;
+        key = "module";
+        want = cfg.modules.some((m) => m.blur && el.matches(m.selector)) ? (settings.hideSuggested ? "blur" : "keep") : actions().suggested;
       } else {
         const signals = extractSignals(el, cfg);
         descriptor = toDescriptor(n++, el, cfg, signals);

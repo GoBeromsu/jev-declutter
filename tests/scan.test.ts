@@ -1186,3 +1186,83 @@ test("the hold ends after its frames and is released on stop", async () => {
   h.frame();
   expect(h.scrolledBy).toEqual([]);
 });
+
+function igSurface(path: string, html: string) {
+  const h = harness(SITES.instagram);
+  window.history.pushState(null, "", path);
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  document.body.append(host);
+  return { h, host };
+}
+
+const PEOPLE_ROW =
+  '<div id="row"><div id="rowInner"><div><span><img alt="x"></span></div>' +
+  '<div><span dir="auto"><span>caption</span></span></div><div><div><button type="button"><div><div dir="auto">Follow</div></div></button></div></div></div></div>';
+
+test("suggested account rows on the suggested accounts page are hidden", async () => {
+  const { h, host } = igSurface("/explore/people/", PEOPLE_ROW);
+  await h.ready();
+  h.mutate(document.body, [host]); h.flush();
+  expect(host.querySelector("#rowInner")!.getAttribute("data-jev")).toBe("hide");
+});
+
+test("row and tile modules apply only on their own Instagram pages", () => {
+  const [rows, tiles] = SITES.instagram.modules.filter((m) => m.paths).map((m) => m.paths!);
+  expect(["/explore/people/", "/explore/people"].map((p) => rows!.test(p))).toEqual([true, true]);
+  expect(["/", "/someone/", "/explore/", "/explore/tags/x/"].map((p) => rows!.test(p))).toEqual([false, false, false, false]);
+  expect(["/explore/", "/explore"].map((p) => tiles!.test(p))).toEqual([true, true]);
+  expect(["/", "/someone/", "/explore/people/", "/explore/tags/x/"].map((p) => tiles!.test(p))).toEqual([false, false, false, false]);
+});
+
+test("recommended post tiles on the Explore page are hidden", async () => {
+  const tiles = '<div id="cell"><div><div><a role="link" href="/p/abc/"><img alt="x"></a></div></div></div>';
+  const { h, host } = igSurface("/explore/", tiles);
+  await h.ready();
+  h.mutate(document.body, [host]); h.flush();
+  expect(host.querySelector("#cell")!.getAttribute("data-jev")).toBe("hide");
+});
+
+const STORIES_TRAY =
+  '<div id="tray" role="presentation"><div><ul><li></li><li tabindex="-1"><div role="button" aria-label="Story by x, not seen" tabindex="0">' +
+  '<canvas></canvas><span role="link"><img alt="x"></span></div></li></ul></div></div>';
+
+test("the stories tray is blurred in place and stays clickable, and a late story changes nothing", async () => {
+  const { h, host } = igSurface("/", STORIES_TRAY);
+  await h.ready();
+  h.mutate(document.body, [host]); h.flush();
+  const tray = host.querySelector("#tray")!;
+  expect(tray.getAttribute("data-jev")).toBe("blur");
+  const li = document.createElement("li");
+  tray.querySelector("ul")!.append(li);
+  h.mutate(tray.querySelector("ul")!, [li]); h.flush();
+  expect(tray.getAttribute("data-jev")).toBe("blur");
+  expect(li.hasAttribute("data-jev")).toBe(false);
+  const css = document.getElementById("jev-declutter")!.textContent!;
+  expect(css).toContain('[data-jev="blur"][role="presentation"]{opacity:1!important;pointer-events:auto!important');
+});
+
+test("the stories tray is left alone when suggested content is not hidden", async () => {
+  const { h, host } = igSurface("/", STORIES_TRAY);
+  await h.ready({ ...DEFAULT_SETTINGS, hideSuggested: false });
+  h.mutate(document.body, [host]); h.flush();
+  expect(host.querySelector("[data-jev]")).toBeNull();
+});
+
+test("Instagram navigation links match under a locale query but hashtag links do not", () => {
+  const modules = SITES.instagram.modules.map((m) => m.selector).join(",");
+  const host = document.createElement("div");
+  host.innerHTML =
+    '<a id="a" href="/reels/?hl=ko"></a><a id="b" href="/explore/?hl=ko"></a><a id="c" href="/explore/"></a>' +
+    '<a id="d" href="/explore/tags/cats/"></a><a id="e" href="/reels/abc/"></a>';
+  expect([...host.querySelectorAll(modules)].map((el) => el.id)).toEqual(["a", "b", "c"]);
+});
+
+test("a Korean sponsored label in the account row is an ad label", () => {
+  const article = document.createElement("article");
+  article.innerHTML =
+    '<div data-interactable><div><span dir="auto"><div><a role="link" href="#"><span>user</span></a></div></span></div>' +
+    '<div><span dir="auto"><div><span>광고</span></div></span></div></div>';
+  document.body.append(article);
+  expect(deterministic(extractSignals(article, SITES.instagram), SITES.instagram)).toEqual({ category: "ad", p: 1 });
+});

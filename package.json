@@ -14,7 +14,7 @@
     {
       "name": "content script",
       "path": ".output/chrome-mv3/content-scripts/content.js",
-      "limit": "33400 B",
+      "limit": "34100 B",
       "gzip": false,
       "brotli": false
     },
