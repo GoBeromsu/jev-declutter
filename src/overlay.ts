@@ -60,13 +60,13 @@ const FONT = '-apple-system,BlinkMacSystemFont,"Segoe UI","Apple SD Gothic Neo",
 const CSS =
   ".box,.q,button{all:initial;color-scheme:inherit}" +
   ".box{--panel:light-dark(#fff,#22242c);--fg:light-dark(#282632,#eeedf4);--chrome:light-dark(#f0efec,#1e2027);" +
-  "--line:light-dark(#dedbe3,#3c3c49);--accent:light-dark(#7355b6,#c0a8fb);--accent-bg:light-dark(#ede7f7,#39304b);" +
+  "--line:light-dark(#dedbe3,#3c3c49);--control-edge:light-dark(#8d8896,#6f6b7d);--accent:light-dark(#7355b6,#c0a8fb);--accent-bg:light-dark(#ede7f7,#39304b);" +
   "--accent-bg-hover:light-dark(#e2d9f3,#453a5b);--shadow:light-dark(#1d17201a,#00000036);" +
   "display:inline-flex;align-items:center;gap:4px;box-sizing:border-box;max-width:100%;" +
   "padding:4px 4px 4px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);" +
   "box-shadow:0 2px 10px var(--shadow);animation:settle 180ms cubic-bezier(.2,.7,.2,1)}" +
   `.q{margin-right:4px;color:var(--fg);font:500 12px/1.4 ${FONT};white-space:nowrap;overflow:hidden;text-overflow:ellipsis}` +
-  `button{flex:none;cursor:pointer;padding:2px 9px;border:1px solid var(--line);border-radius:7px;background:var(--chrome);color:var(--fg);` +
+  `button{flex:none;cursor:pointer;padding:2px 9px;border:1px solid var(--control-edge);border-radius:7px;background:var(--chrome);color:var(--fg);` +
   `font:500 12px/1.4 ${FONT};transition:transform 120ms ease-out}` +
   "button:hover{border-color:var(--fg)}" +
   "button:active{transform:scale(.96)}" +

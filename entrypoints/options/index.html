@@ -17,11 +17,12 @@
       --fg: light-dark(#282632, #eeedf4);
       --muted: light-dark(#67626e, #aaa6b7);
       --line: light-dark(#dedbe3, #3c3c49);
+      --control-edge: light-dark(#8d8896, #6f6b7d);
       --accent: light-dark(#7355b6, #c0a8fb);
       --accent-bg: light-dark(#ede7f7, #39304b);
       --green: light-dark(#247051, #8bd5b3);
       --green-bg: light-dark(#e8f5ed, #253d34);
-      --amber: light-dark(#966320, #edbf78);
+      --amber: light-dark(#855517, #edbf78);
       --amber-bg: light-dark(#fcf0d9, #443926);
       --red: light-dark(#a8402f, #f0a596);
       --red-bg: light-dark(#fbe9e5, #46291f);
@@ -59,7 +60,7 @@
 
     h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
 
-    h2 { font-size: 14px; font-weight: 600; }
+    h2 { color: var(--muted); font-size: 13px; font-weight: 600; }
 
     h3 { font-size: 13px; font-weight: 500; }
 
@@ -69,7 +70,7 @@
 
     .page-desc { margin-top: 4px; }
 
-    .section-head { margin-bottom: 8px; }
+    .section-head { margin-bottom: 16px; }
 
     .caption { margin-top: 8px; }
 
@@ -136,7 +137,7 @@
       height: 22px;
       margin: 0;
       border-radius: 999px;
-      background: var(--line);
+      background: var(--control-edge);
       cursor: pointer;
       transition: background-color 120ms ease-out;
     }
@@ -165,7 +166,7 @@
       width: 220px;
       height: 30px;
       padding: 0 8px;
-      border: 1px solid var(--line);
+      border: 1px solid var(--control-edge);
       border-radius: 7px;
       background: var(--chrome);
       color: var(--fg);
@@ -195,7 +196,7 @@
       flex: none;
       height: 30px;
       padding: 0 12px;
-      border: 1px solid var(--line);
+      border: 1px solid var(--control-edge);
       border-radius: 7px;
       background: var(--chrome);
       color: var(--fg);
@@ -430,7 +431,7 @@
         <div class="setting" id="budget">
           <div class="setting-info">
             <span class="setting-name">오늘 모델 요청</span>
-            <span class="setting-desc">현재 providerKey <code id="budget-key"></code></span>
+            <span class="setting-desc"><span id="budget-key">현재 기준 모델의 사용량입니다.</span></span>
           </div>
           <div class="budget-value">
             <strong id="budget-count"></strong>
@@ -441,8 +442,8 @@
         </div>
         <div class="setting" id="filtered">
           <div class="setting-info">
-            <span class="setting-name">오늘 걸러낸 서명</span>
-            <span class="setting-desc">오늘의 모델 판정 기준입니다. 규칙으로 숨긴 항목은 세지 않습니다.</span>
+            <span class="setting-name">오늘 걸러낸 항목</span>
+            <span class="setting-desc">오늘 모델이 판정한 항목 기준입니다. 규칙으로 숨긴 항목은 세지 않습니다.</span>
           </div>
           <div class="counts">
             <span>숨김 <strong id="filtered-hidden">0</strong></span>
@@ -520,7 +521,7 @@
             </label>
             <label class="setting">
               <span class="setting-info">
-                <span class="setting-name">추천 · 팔로우하지 않은 계정</span>
+                <span class="setting-name">추천 및 팔로우하지 않은 계정의 게시물</span>
                 <span class="setting-desc">내가 고르지 않은 게시물을 같은 방식으로 거릅니다.</span>
               </span>
               <input class="switch" role="switch" type="checkbox" id="hide-suggested" checked />
@@ -532,7 +533,7 @@
     <section aria-labelledby="verdicts-title">
       <div class="section-head">
         <h2 id="verdicts-title">오늘의 판정</h2>
-        <p class="section-desc">사이트별 판정 캐시</p>
+        <p class="section-desc">사이트별 판정 기록</p>
       </div>
       <div class="group">
         <div id="diagnostics"></div>
@@ -541,7 +542,7 @@
             <span class="setting-name">처음부터 다시 판정</span>
             <span class="setting-desc">다음 페이지 이동부터 모델이 다시 판정합니다.</span>
           </div>
-          <button class="btn" id="reset" type="button">오늘 캐시 비우기</button>
+          <button class="btn" id="reset" type="button">오늘 판정 기록 비우기</button>
         </div>
       </div>
     </section>

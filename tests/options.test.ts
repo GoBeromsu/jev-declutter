@@ -193,7 +193,7 @@ test("renderDiagnostics: one row per signalKey, '-' for null, two decimals, day,
   expect(yt.dataset.providerKey).toBe("openai:gpt-6-luna:1");
   expect(yt.dataset.stale).toBe("false");
   expect(yt.textContent).toContain("2026-10-28");
-  expect(yt.textContent).toContain("openai:gpt-6-luna:1");
+  expect(yt.title).toBe("openai:gpt-6-luna:1");
 
   for (const site of ["x", "instagram", "linkedin"] as const) {
     expect(rowsOf(doc, site).length).toBe(0);
@@ -226,7 +226,7 @@ test("stale_state: a cache with another providerKey or day still renders, labell
   expect(x.dataset.day).toBe("2026-10-27");
   expect(x.dataset.stale).toBe("true");
   expect(cells(rowsOf(doc, "x")[0])).toEqual(["a", "1.00", "0.00"]);
-  expect(x.textContent).toContain("typesafe:jev-latest:1");
+  expect(x.title).toBe("typesafe:jev-latest:1");
 });
 
 test("malformed input: broken caches and a malformed budget render without throwing", () => {

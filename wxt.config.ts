@@ -11,6 +11,7 @@ export default defineConfig({
   manifest: {
     name: "Jev Declutter",
     description: "Remove or blur ads, not-followed recommendations and recommendation modules in the YouTube, X, Instagram and LinkedIn feeds.",
+    minimum_chrome_version: "123",
     permissions: ["storage"],
     host_permissions: ["https://api.openai.com/*", "https://api.typesafe.ai/*"],
     action: { default_title: "Jev Declutter settings" }

@@ -125,7 +125,7 @@ function tableOf(doc: Document, rows: Row[], overCap: ReadonlySet<string>): HTML
   const table = el(doc, "table");
   const head = el(doc, "thead");
   const headRow = el(doc, "tr");
-  headRow.append(el(doc, "th", "key", "signalKey"), el(doc, "th", "num", "광고"), el(doc, "th", "num", "추천"));
+  headRow.append(el(doc, "th", "key", "항목"), el(doc, "th", "num", "광고"), el(doc, "th", "num", "추천"));
   head.append(headRow);
   const body = el(doc, "tbody");
   for (const [key, ad, suggested] of rows) {
@@ -156,23 +156,24 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView, wasOpen: 
   block.id = `diag-${site}`;
   block.dataset.day = day;
   block.dataset.providerKey = key;
+  block.title = key;
   block.dataset.rows = String(rows.length);
   block.dataset.stale = String(stale);
   block.dataset.overCap = String(overCap.size);
 
   const head = el(doc, "div", "diag-head");
   head.append(el(doc, "h3", "", SITE_LABELS[site]));
-  if (!cache) head.append(el(doc, "span", "tag tag-none", "캐시 없음"));
+  if (!cache) head.append(el(doc, "span", "tag tag-none", "기록 없음"));
   else if (stale) head.append(el(doc, "span", "tag tag-stale", "현재 설정과 다름"));
   else head.append(el(doc, "span", "tag tag-fresh", "오늘"));
   if (overCap.size > 0) {
-    head.append(el(doc, "span", "tag tag-stale", `그룹 상한 초과 서명 ${overCap.size}개`));
+    head.append(el(doc, "span", "tag tag-stale", `그룹 상한 초과 항목 ${overCap.size}개`));
   }
   if (!cache) {
     block.append(head, el(doc, "p", "empty", "아직 이 사이트의 판정이 저장되지 않았습니다."));
     return block;
   }
-  const meta = `day ${day || "?"} · providerKey ${key || "?"} · ${rows.length}개`;
+  const meta = `날짜 ${day || "?"} · ${rows.length}개`;
   if (rows.length === 0) {
     block.append(head, el(doc, "p", "meta", meta), el(doc, "p", "empty", "저장된 판정이 없습니다."));
     return block;
@@ -184,8 +185,8 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView, wasOpen: 
   details.append(summary);
   if (overCap.size > 0) {
     details.append(el(doc, "p", "meta",
-      "아래 '그룹 상한' 서명은 한 모델 판정이 한 페이지에서 상한을 넘는 항목에 걸렸습니다. " +
-      "상한을 넘은 항목은 건드리지 않았습니다. 잘못된 판정이면 오늘 캐시를 비우세요."));
+      "아래 '그룹 상한' 항목은 한 모델 판정이 한 페이지에서 상한을 넘는 항목에 걸렸습니다. " +
+      "상한을 넘은 항목은 건드리지 않았습니다. 잘못된 판정이면 오늘 판정 기록을 비우세요."));
   }
   details.append(tableOf(doc, rows, overCap));
   block.append(details);
@@ -207,7 +208,7 @@ function overrideBlock(doc: Document, site: SiteId, map: OverrideMap): HTMLEleme
   const table = el(doc, "table");
   const headRow = el(doc, "tr");
   headRow.append(
-    el(doc, "th", "key", "signalKey"),
+    el(doc, "th", "key", "항목"),
     el(doc, "th", "", "응답"),
     el(doc, "th", "", "날짜"),
     el(doc, "th", "", "")
@@ -301,7 +302,7 @@ function renderConnection(view: DiagnosticsView, settings: Settings, answered: n
       : paused
         ? (["paused", "stale", "일시 중지", `요청 한도 또는 서버 오류로 ${clockTime(view.pausedUntil ?? 0)}까지 쉽니다.`] as const)
         : answered > 0
-          ? (["answered", "fresh", "오늘 응답함", `${provider}가 오늘 ${answered}개 서명에 답했습니다.`] as const)
+          ? (["answered", "fresh", "오늘 응답함", `${provider}가 오늘 ${answered}개 항목에 답했습니다.`] as const)
           : (["idle", "none", "아직 호출 전", "다음 피드 방문 때 확인됩니다."] as const);
   $<HTMLElement>(root, "connection").dataset.state = state;
   setTag($<HTMLElement>(root, "connection-state"), tone, stateText);
@@ -323,7 +324,7 @@ export function renderDiagnostics(view: DiagnosticsView, root: ParentNode = docu
   budget.dataset.limit = String(DAILY_REQUEST_BUDGET);
   budget.dataset.level = ratio >= BUDGET_WARNING_RATIO ? "high" : "normal";
   $<HTMLElement>(root, "budget-count").textContent = `${used} / ${DAILY_REQUEST_BUDGET}`;
-  $<HTMLElement>(root, "budget-key").textContent = view.currentKey;
+  $<HTMLElement>(root, "budget-key").title = view.currentKey;
   const meter = $<HTMLElement>(root, "budget-meter");
   meter.setAttribute("aria-valuenow", String(used));
   meter.setAttribute("aria-valuemax", String(DAILY_REQUEST_BUDGET));
@@ -426,9 +427,9 @@ export async function main(root: ParentNode = document): Promise<void> {
         const msg: Message = { type: "reset" };
         await chrome.runtime.sendMessage(msg);
         await refresh();
-        note("reset", "오늘 캐시를 비웠습니다. 다음 페이지 이동부터 다시 판정합니다.");
+        note("reset", "오늘 판정 기록을 비웠습니다. 다음 페이지 이동부터 다시 판정합니다.");
       } catch (err) {
-        note("error", `캐시 비우기 실패: ${describe(err)}`);
+        note("error", `판정 기록 비우기 실패: ${describe(err)}`);
       }
     })();
   });

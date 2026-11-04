@@ -32,10 +32,11 @@ Options tokens live on `:root` in `entrypoints/options/index.html`. In-page toke
 | `--chrome` | `#f0efec` | `#1e2027` | Controls at rest, code cells |
 | `--fg` | `#282632` | `#eeedf4` | Names and values |
 | `--muted` | `#67626e` | `#aaa6b7` | Descriptions and captions |
-| `--line` | `#dedbe3` | `#3c3c49` | Separators, control borders, switch off |
+| `--line` | `#dedbe3` | `#3c3c49` | Row dividers and card borders |
+| `--control-edge` | `#8d8896` | `#6f6b7d` | Switch off track, field and button borders (3:1 against panel) |
 | `--accent` / `--accent-bg` | `#7355b6` / `#ede7f7` | `#c0a8fb` / `#39304b` | On state, focus, the one suggested answer |
 | `--green` / `--green-bg` | `#247051` / `#e8f5ed` | `#8bd5b3` / `#253d34` | Healthy state |
-| `--amber` / `--amber-bg` | `#966320` / `#fcf0d9` | `#edbf78` / `#443926` | Needs attention, recoverable |
+| `--amber` / `--amber-bg` | `#855517` / `#fcf0d9` | `#edbf78` / `#443926` | Needs attention, recoverable |
 | `--red` / `--red-bg` | `#a8402f` / `#fbe9e5` | `#f0a596` / `#46291f` | Failed action only |
 | `--shadow` | `#1d17201a` | `#00000036` | Floating elements only |
 
@@ -89,7 +90,7 @@ One 680px column. A row puts name and description on the left and the control on
 
 | State | Specification | same_as | non_color_cue |
 |---|---|---|---|
-| default | 40x22 track, off `--line`, on `--accent` | | Thumb left or right |
+| default | 40x22 track, off `--control-edge`, on `--accent` | | Thumb left or right |
 | hover | Track at 85% opacity | | Pointer cursor |
 | active | Thumb travels 120ms via transform | | Thumb movement |
 | focus | 2px `--accent` outline, 2px offset | | Outline |
@@ -102,7 +103,7 @@ One 680px column. A row puts name and description on the left and the control on
 
 | State | Specification | same_as | non_color_cue |
 |---|---|---|---|
-| default | 30px high, 220px wide, `--chrome` fill, `--line` border | | Border, chevron |
+| default | 30px high, 220px wide, `--chrome` fill, `--control-edge` border | | Border, chevron |
 | hover | Border darkens to `--muted` | | Border contrast |
 | active | Follows focus | field.focus | Outline |
 | focus | 2px `--accent` outline | | Outline |
@@ -115,7 +116,7 @@ One 680px column. A row puts name and description on the left and the control on
 
 | State | Specification | same_as | non_color_cue |
 |---|---|---|---|
-| default | 30px high, `--chrome` fill, `--line` border | | Label |
+| default | 30px high, `--chrome` fill, `--control-edge` border | | Label |
 | hover | Border darkens to `--muted` | | Border contrast |
 | active | Scale .98 | | Size |
 | focus | 2px `--accent` outline | | Outline |
@@ -228,7 +229,9 @@ Switches are checkboxes with `role=switch` inside their label. The meter is `rol
 
 | id | decision | date | upgrade_path |
 |---|---|---|---|
-| chrome-123 | `light-dark()` requires Chrome 123 or later; older browsers lose these colors | 2026-11-04 | Set `minimum_chrome_version`, or duplicate tokens in media queries |
+| chrome-123 | Resolved: `minimum_chrome_version` is "123", the `light-dark()` requirement | 2026-11-04 | None |
+| item-transition | `ITEM_CSS` overrides the host's `transition` on the marked item, animating only opacity and filter with no reflow | 2026-11-04 | None planned |
+| host-scheme-rgb | `hostColorScheme` parses only rgb/rgba; `color()` and `oklch()` hosts fall back to the OS scheme | 2026-11-04 | Parse more color syntaxes |
 | no-probe | Provider state is inferred from today's answers because a probe would spend budget | 2026-11-04 | Persist the last call result in the background |
 | signature-count | "Filtered today" counts model signatures, not items, and leaves out rule-based hides | 2026-11-04 | Have the scanner persist per-day counters |
 | no-exit-motion | The prompt has no exit animation because its removal must be synchronous | 2026-11-04 | None planned |
