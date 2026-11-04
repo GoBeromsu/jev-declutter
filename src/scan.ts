@@ -1,5 +1,5 @@
 import { clearOverCap, ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
-import { actionFor, actionsOf, combine, ITEM_CSS, onScreen, readingDrift, today, type ReadingPosition } from "./decide";
+import { actionFor, actionsOf, combine, COLLAPSE_CSS, ITEM_CSS, onScreen, readingDrift, today, type ReadingPosition } from "./decide";
 import { createOverlay, type OverlayHost, type OverlayOrigin, type OverlayRect } from "./overlay";
 import { emptyOverrides, loadOverrides, lookupOverride, saveOverride, type OverrideDecision, type OverrideMap } from "./overrides";
 import { deterministic } from "./rules";
@@ -101,7 +101,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   let cacheReady = false;
   let stopped = false;
   let path = location.pathname;
-  let inUpdate = false;
   let contentFramePainted = false;
   const pageHasPainted = () => contentFramePainted || host.painted();
   let frameId: number | undefined;
@@ -487,30 +486,28 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       if (module) candidates.add(module);
     }
     for (const el of candidates) observe(el);
-    if (inUpdate) flush("mutation");
+    flush("mutation");
   });
 
   host.overlay.answers(answered);
   const style = document.getElementById("jev-declutter") ?? document.createElement("style");
   style.id = "jev-declutter";
-  style.textContent = ITEM_CSS;
+  style.textContent = cfg.collapseHidden ? ITEM_CSS + COLLAPSE_CSS : ITEM_CSS;
   if (!style.isConnected) (document.head ?? document.documentElement).append(style);
   function frame() {
-    if (stopped || document.hidden) { frameId = undefined; inUpdate = false; return; }
+    if (stopped || document.hidden) { frameId = undefined; return; }
     frameId = host.frame(frame);
-    inUpdate = true;
     readingHoldFrame();
     const contentFrame = !contentFramePainted && [...pending, ...states.keys()].some(
       (el) => el.checkVisibility()
     );
     host.postTask(() => {
       if (contentFrame && !document.hidden) contentFramePainted = true;
-      inUpdate = false;
     });
   }
   function visibility() {
     if (frameId !== undefined) host.cancelFrame(frameId);
-    frameId = undefined; inUpdate = false;
+    frameId = undefined;
     if (!document.hidden) frameId = host.frame(frame);
   }
   document.addEventListener("visibilitychange", visibility);

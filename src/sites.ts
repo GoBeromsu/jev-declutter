@@ -18,6 +18,7 @@ export interface SiteConfig {
   feedPaths: RegExp[];
   navEvent?: string;
   bodyExclude: string;
+  collapseHidden?: boolean;
 }
 
 export const SITES: Record<SiteId, SiteConfig> = {
@@ -71,6 +72,7 @@ export const SITES: Record<SiteId, SiteConfig> = {
     id: "instagram",
     hosts: ["www.instagram.com"],
     item: "article",
+    collapseHidden: true,
     adSelectors: [],
     labelSlots: 'article header span, article header a[role="link"] + div span, article span[dir="auto"] span:not([dir])',
     bodyExclude:

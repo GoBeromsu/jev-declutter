@@ -48,6 +48,9 @@ export const ITEM_CSS =
   '[data-jev="blur"]{transition:filter .18s ease-out,opacity .18s ease-out!important}' +
   '@media (prefers-reduced-motion:reduce){[data-jev="blur"]{transition:opacity .12s linear!important}}';
 
+export const COLLAPSE_CSS =
+  '[data-jev="hide"]{display:block!important;height:0!important;overflow:hidden!important;padding:0!important;margin:0!important;visibility:hidden!important}';
+
 export function today(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;

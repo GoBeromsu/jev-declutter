@@ -7,7 +7,7 @@ import { deterministic } from "../src/rules";
 import { SITES, type SiteConfig } from "../src/sites";
 import { DEFAULT_SETTINGS } from "../src/storage";
 import { freshCache, MAX_ITEMS, MIN_MODEL_GROUP, modelGroupCap, providerKey } from "../src/cache";
-import { today } from "../src/decide";
+import { COLLAPSE_CSS, today } from "../src/decide";
 import { extractSignals, toDescriptor } from "../src/signals";
 import type { ClassifyResult, Message, Settings, SignatureCache } from "../src/types";
 
@@ -128,17 +128,16 @@ function item(label = "Sponsored", top = 1000) {
   return el;
 }
 
-for (const path of ["ro", "mutation"] as const) {
+for (const inFrame of [false, true]) {
   for (const [painted, top] of [[false, 0], [true, 0], [true, 2000]] as const) {
-    test(`${path} independently hides a deterministic ad painted=${painted} top=${top}`, () => {
+    test(`a mutation hides a deterministic ad synchronously inFrame=${inFrame} painted=${painted} top=${top}`, () => {
       const h = harness();
       if (painted) h.painted();
-      if (path === "mutation") h.frame();
+      if (inFrame) h.frame();
       const el = item("Sponsored", top);
       h.mutate(document.body, [el]);
-      if (path === "ro") { expect(el.hasAttribute("data-jev")).toBe(false); h.flush(); }
       expect(el.getAttribute("data-jev")).toBe("hide");
-      expect(h.scanner.qa.applyPaths.get(el)).toBe(path);
+      expect(h.scanner.qa.applyPaths.get(el)).toBe("mutation");
     });
   }
 }
@@ -250,6 +249,15 @@ for (const [cfg, path, feed] of [[SITES.x, "/messages", "/home"], [SITES.instagr
     }
   });
 }
+
+test("only sites that opt in collapse hidden items to a zero box instead of removing them from layout", () => {
+  const css = () => document.getElementById("jev-declutter")?.textContent ?? "";
+  harness(SITES.instagram);
+  expect(css()).toContain(COLLAPSE_CSS);
+  document.getElementById("jev-declutter")?.remove();
+  harness(SITES.x);
+  expect(css()).not.toContain(COLLAPSE_CSS);
+});
 
 test("runtime rejection fails open", async () => {
   const h = harness(); await h.ready(); h.response(() => Promise.reject(new Error("Receiving end does not exist")));
@@ -523,7 +531,7 @@ test("content frame downgrades a late visible ad while paint entries remain empt
   const ad = item("Sponsored", 0);
   h.mutate(document.body, [ad]); h.flush();
   expect(ad.dataset.jev).toBe("hide");
-  expect(h.scanner.qa.applyPaths.get(ad)).toBe("ro");
+  expect(h.scanner.qa.applyPaths.get(ad)).toBe("mutation");
 });
 
 test("blank frame does not count content connected only after that frame", () => {
@@ -544,7 +552,6 @@ test("item parked inside a display:none ancestor never witnesses a painted frame
   const parked = item("2h", 0);
   hidden.append(parked);
   h.mutate(document.body, [hidden]);
-  expect(h.targets.has(parked)).toBe(true);
   expect(getComputedStyle(parked).display).toBe("block");
   expect(parked.checkVisibility()).toBe(false);
   h.frame(); h.task();
