@@ -40,7 +40,11 @@ function harness(cfg = SITES.x) {
   const targets = new Set<Element>();
   const observations: Element[] = [];
   let mutation: (records: readonly Mutation[]) => void = () => {};
-  let resize: () => void = () => {};
+  let resize: (() => void) | undefined;
+  const readingWatchers: { callback: () => void; targets: Set<Element> }[] = [];
+  const scrolledBy: number[] = [];
+  let scrollY = 0;
+  let readingCandidates: (Element | null)[] = [];
   let near: (elements: Element[]) => void = () => {};
   let frame: FrameRequestCallback | undefined;
   let task: (() => void) | undefined;
@@ -53,7 +57,15 @@ function harness(cfg = SITES.x) {
     send: async (msg) => { calls.push(msg); return response(msg); },
     painted: () => painted, now: () => now,
     mutations: (cb) => { mutation = cb; return () => {}; },
-    resize: (cb) => { resize = cb; return { observe: (el) => { targets.add(el); observations.push(el); }, unobserve: (el) => { targets.delete(el); }, disconnect: () => targets.clear() }; },
+    resize: (cb) => {
+      if (resize) {
+        const watcher = { callback: cb, targets: new Set<Element>() };
+        readingWatchers.push(watcher);
+        return { observe: (el) => { watcher.targets.add(el); }, unobserve: (el) => { watcher.targets.delete(el); }, disconnect: () => watcher.targets.clear() };
+      }
+      resize = cb;
+      return { observe: (el) => { targets.add(el); observations.push(el); }, unobserve: (el) => { targets.delete(el); }, disconnect: () => targets.clear() };
+    },
     intersection: (cb) => { near = cb; return { observe: () => {}, unobserve: () => {}, disconnect: () => {} }; },
     frame: (cb) => { frame = cb; return 1; }, cancelFrame: () => { frame = undefined; },
     postTask: (cb) => { task = cb; },
@@ -71,7 +83,10 @@ function harness(cfg = SITES.x) {
       hide: (el) => { prompts.delete(el); },
       revalidate: () => { for (const el of Array.from(prompts.keys())) if (!el.isConnected) prompts.delete(el); },
       clear: () => { prompts.clear(); }
-    }
+    },
+    elementAt: () => readingCandidates.shift() ?? null,
+    scrollY: () => scrollY,
+    scrollBy: (dy) => { scrolledBy.push(dy); scrollY += dy; }
   };
   const scanner = startScanner(cfg, host);
   cleanups.push(scanner.stop);
@@ -86,7 +101,11 @@ function harness(cfg = SITES.x) {
     response: (fn: (message: Message) => Promise<ClassifyResult>) => { response = fn; },
     mutate: (target: Node, addedNodes: Node[] = []) => mutation([{ target, addedNodes }]),
     mutations: (records: readonly Mutation[]) => mutation(records),
-    flush: () => resize(),
+    flush: () => resize?.(),
+    readingWatchers, scrolledBy,
+    readingCandidates: (...elements: (Element | null)[]) => { readingCandidates = elements; },
+    userScroll: (y: number) => { scrollY = y; },
+    deliverReadingResize: () => { for (const watcher of readingWatchers) if (watcher.targets.size > 0) watcher.callback(); },
     frame: () => { const cb = frame; frame = undefined; cb?.(now); },
     task: () => { const cb = task; task = undefined; cb?.(); },
     hasFrame: () => frame !== undefined,
@@ -1077,4 +1096,86 @@ test("DOMContentLoaded does not enqueue already processed initial items again", 
   h.mutate(document.body, [el]); h.flush(); const before = h.observations.length;
   document.dispatchEvent(new Event("DOMContentLoaded"));
   expect(h.observations).toHaveLength(before);
+});
+
+function readingScene(victimTop: number, anchorTop: number) {
+  const victim = item("Sponsored", victimTop);
+  const anchor = item("", anchorTop);
+  const moveAnchorTo = (top: number) => {
+    Object.defineProperty(anchor, "getBoundingClientRect", { configurable: true, value: () => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100 }) });
+  };
+  return { victim, anchor, moveAnchorTo };
+}
+
+async function hideWithAnchor(victimTop: number) {
+  const h = harness(); await h.ready(); h.painted();
+  const scene = readingScene(victimTop, 300);
+  h.readingCandidates(scene.anchor, scene.anchor, scene.anchor);
+  h.mutate(document.body, [scene.victim]); h.flush();
+  expect(scene.victim.getAttribute("data-jev")).toBe("hide");
+  return { h, ...scene };
+}
+
+test("a hide above the viewport scrolls back the anchor's drift once the host has re-laid out", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(-500);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([]);
+  moveAnchorTo(200);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([-100]);
+});
+
+test("a relayout the host defers to a later frame is still restored before that frame paints", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(-500);
+  h.frame();
+  moveAnchorTo(200);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([-100]);
+});
+
+test("the watcher targets a block descendant, deeper than the item whose resize round runs the flush", async () => {
+  const h = harness(); await h.ready(); h.painted();
+  const { victim, anchor } = readingScene(-500, 300);
+  const block = document.createElement("div");
+  Object.defineProperty(block, "clientHeight", { value: 80 });
+  anchor.append(document.createElement("span"), block);
+  Object.defineProperty(block, "getBoundingClientRect", { value: () => ({ top: 320, bottom: 400, left: 0, right: 100, width: 100, height: 80 }) });
+  h.readingCandidates(anchor);
+  h.mutate(document.body, [victim]); h.flush();
+  expect([...(h.readingWatchers[0]?.targets ?? [])]).toEqual([block]);
+});
+
+test("a hide fully on screen never scrolls", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(100);
+  moveAnchorTo(200);
+  h.deliverReadingResize();
+  expect(h.readingWatchers).toHaveLength(0);
+  expect(h.scrolledBy).toEqual([]);
+});
+
+test("a user scroll is rebaselined and never fought", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(-500);
+  h.userScroll(400);
+  moveAnchorTo(-100);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([]);
+});
+
+test("restoring never scrolls further than the height hidden above the anchor", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(-500);
+  moveAnchorTo(-700);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([-100]);
+  moveAnchorTo(-900);
+  h.deliverReadingResize();
+  expect(h.scrolledBy).toEqual([-100]);
+});
+
+test("the hold ends after its frames and is released on stop", async () => {
+  const { h, moveAnchorTo } = await hideWithAnchor(-500);
+  h.frame(); h.frame(); h.frame();
+  moveAnchorTo(200);
+  h.deliverReadingResize();
+  h.frame();
+  expect(h.scrolledBy).toEqual([]);
 });

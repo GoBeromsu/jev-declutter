@@ -31,6 +31,17 @@ export function onScreen(pos: Placement): boolean {
   return Number.isNaN(pos.top) || (pos.pageHasPainted && !(pos.top >= Math.max(0, pos.viewportHeight)));
 }
 
+export interface ReadingPosition {
+  top: number;
+  scrollY: number;
+}
+
+export function readingDrift(before: ReadingPosition, after: ReadingPosition, collapsedAbove: number): number {
+  if (after.scrollY !== before.scrollY) return 0;
+  const drift = after.top - before.top;
+  return drift < -0.5 ? Math.max(drift, -collapsedAbove) : 0;
+}
+
 export const ITEM_CSS =
   '[data-jev="hide"]{display:none!important}' +
   '[data-jev="blur"]{filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}';

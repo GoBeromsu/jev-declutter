@@ -1,5 +1,5 @@
 import { clearOverCap, ensureCurrent, freshCache, loadSigCache, lookup, MAX_ITEMS, modelGroupCap, providerKey, recordOverCap, remember } from "./cache";
-import { actionFor, actionsOf, combine, ITEM_CSS, onScreen, today } from "./decide";
+import { actionFor, actionsOf, combine, ITEM_CSS, onScreen, readingDrift, today, type ReadingPosition } from "./decide";
 import { createOverlay, type OverlayHost, type OverlayOrigin, type OverlayRect } from "./overlay";
 import { emptyOverrides, loadOverrides, lookupOverride, saveOverride, type OverrideDecision, type OverrideMap } from "./overrides";
 import { deterministic } from "./rules";
@@ -37,7 +37,13 @@ export interface ScanHost {
   overrides(): Promise<OverrideMap | undefined>;
   override(key: string, decision: OverrideDecision): void;
   overlay: OverlayHost;
+  elementAt(x: number, y: number): Element | null;
+  scrollY(): number;
+  scrollBy(dy: number): void;
 }
+
+const READING_ANCHOR_HEIGHTS = [1 / 2, 1 / 4, 3 / 4];
+const READING_HOLD_FRAMES = 3;
 
 function browserHost(cfg: SiteConfig): ScanHost {
   const overlay = createOverlay(() => undefined);
@@ -73,7 +79,10 @@ function browserHost(cfg: SiteConfig): ScanHost {
         .then(() => (decision === "keep" ? clearOverCap(cfg.id, key) : undefined))
         .catch(() => undefined);
     },
-    overlay
+    overlay,
+    elementAt: (x, y) => document.elementFromPoint(x, y),
+    scrollY: () => window.scrollY,
+    scrollBy: (dy) => window.scrollBy({ top: dy, behavior: "instant" })
   };
 }
 
@@ -111,6 +120,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   let chargedUnder = new WeakMap<Element, string>();
   const overCapped = new Set<string>();
   let reportedOverCap = 0;
+  let readingHold: { anchor: Element; watcher: Observer; last: ReadingPosition; collapsedAbove: number; frames: number } | undefined;
   let observedItems = 0;
   let observedSeen = new WeakSet<Element>();
   const priority = new Set<Element>();
@@ -175,6 +185,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     path = location.pathname;
     generation++;
     queue.clear(); inflight.clear(); answers.clear(); pending.clear(); applyRO.disconnect(); nearIO.disconnect();
+    releaseReadingHold();
     host.overlay.clear();
     charges.clear(); chargedUnder = new WeakMap(); overCapped.clear(); reportedOverCap = 0;
     observedItems = 0; observedSeen = new WeakSet(); qa.observedItems = 0;
@@ -254,6 +265,63 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     return el.parentElement?.getBoundingClientRect().top ?? 0;
   }
 
+  const readPosition = (anchor: Element): ReadingPosition => ({ top: anchor.getBoundingClientRect().top, scrollY: host.scrollY() });
+
+  function releaseReadingHold() {
+    readingHold?.watcher.disconnect();
+    readingHold = undefined;
+  }
+
+  function restoreReadingPosition() {
+    if (!readingHold) return;
+    if (!readingHold.anchor.isConnected) { releaseReadingHold(); return; }
+    const position = readPosition(readingHold.anchor);
+    const drift = readingDrift(readingHold.last, position, readingHold.collapsedAbove);
+    readingHold.last = position;
+    if (drift === 0) return;
+    readingHold.collapsedAbove += drift;
+    host.scrollBy(drift);
+  }
+
+  function readingHoldFrame() {
+    restoreReadingPosition();
+    if (!readingHold) return;
+    if (--readingHold.frames <= 0) { releaseReadingHold(); return; }
+    readingHold.watcher.unobserve(readingHold.anchor);
+    readingHold.watcher.observe(readingHold.anchor);
+  }
+
+  function readingAnchor(x: number, doomed: (el: Element) => boolean): Element | undefined {
+    for (const height of READING_ANCHOR_HEIGHTS) {
+      let hit = host.elementAt(x, innerHeight * height);
+      if (!hit?.closest(selector) || doomed(hit)) continue;
+      while (hit.clientHeight === 0 && hit.parentElement && !hit.matches(selector)) hit = hit.parentElement;
+      const blockChildOf = (el: Element) => [...el.children].find((child) => child.clientHeight > 0 && !doomed(child));
+      for (let child = blockChildOf(hit); child; child = blockChildOf(hit)) hit = child;
+      return hit;
+    }
+    return undefined;
+  }
+
+  function holdReadingPosition(collapsing: readonly OverlayRect[], doomed: (el: Element) => boolean) {
+    if (collapsing.length === 0) return;
+    const kept = readingHold && !doomed(readingHold.anchor) ? readingHold.anchor : undefined;
+    const startingAbove = collapsing.find((rect) => rect.top < 0);
+    const anchor = kept ?? (startingAbove && readingAnchor(startingAbove.left + startingAbove.width / 2, doomed));
+    if (!anchor) { releaseReadingHold(); return; }
+    const position = readPosition(anchor);
+    const collapsedAbove = collapsing.reduce((sum, rect) => (rect.top < position.top ? sum + rect.height : sum), 0);
+    if (readingHold && kept) {
+      readingHold.collapsedAbove += collapsedAbove;
+      readingHold.frames = READING_HOLD_FRAMES;
+      return;
+    }
+    releaseReadingHold();
+    const watcher = host.resize(restoreReadingPosition);
+    readingHold = { anchor, watcher, last: position, collapsedAbove, frames: READING_HOLD_FRAMES };
+    watcher.observe(anchor);
+  }
+
   function flush(applyPath: "ro" | "mutation") {
     if (!active()) return;
     cache = ensureCurrent(cache, today(), providerKey(settings));
@@ -328,14 +396,24 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         rect: { top: box.top, left: box.left, width: box.width, height: box.height },
         top: reveal && painted ? revealTop(el) : box.top });
     }
-    for (const { el, want, top, reveal, key, charge: chargeKey, model, rect } of writes) {
-      if (el.hasAttribute("data-jev-held") || (reveal && painted && top < innerHeight)) {
+    const heldBack = ({ el, reveal, top }: (typeof writes)[number]) =>
+      el.hasAttribute("data-jev-held") || (reveal && painted && top < innerHeight);
+    const actionOf = ({ el, want, model, top }: (typeof writes)[number]): Action =>
+      model && want === "hide" && el.getAttribute("data-jev") !== "hide" &&
+      onScreen({ pageHasPainted: painted, top, viewportHeight: innerHeight }) ? "blur" : want;
+    const hiding = writes.filter((write) => !heldBack(write) && actionOf(write) === "hide");
+    holdReadingPosition(
+      hiding.filter(({ el, rect }) => el.getAttribute("data-jev") !== "hide" && rect.height > 0).map(({ rect }) => rect),
+      (el) => hiding.some((write) => write.el.contains(el))
+    );
+    for (const write of writes) {
+      const { el, key, charge: chargeKey, model, rect } = write;
+      if (heldBack(write)) {
         el.setAttribute("data-jev-held", "");
         host.overlay.hide(el);
         continue;
       }
-      const action: Action = model && want === "hide" && el.getAttribute("data-jev") !== "hide" &&
-        onScreen({ pageHasPainted: painted, top, viewportHeight: innerHeight }) ? "blur" : want;
+      const action = actionOf(write);
       if (action === "keep") el.removeAttribute("data-jev");
       else el.setAttribute("data-jev", action);
       if (model && action === "blur" && origin && rect.width > 0 && rect.height > 0) {
@@ -421,6 +499,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (stopped || document.hidden) { frameId = undefined; inUpdate = false; return; }
     frameId = host.frame(frame);
     inUpdate = true;
+    readingHoldFrame();
     const contentFrame = !contentFramePainted && [...pending, ...states.keys()].some(
       (el) => el.checkVisibility()
     );
@@ -478,6 +557,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     stop() {
       stopped = true; generation++;
       disconnectMO(); applyRO.disconnect(); nearIO.disconnect(); host.overlay.clear();
+      releaseReadingHold();
       if (frameId !== undefined) host.cancelFrame(frameId);
       if (timerId !== undefined) host.cancelTimer(timerId);
       document.removeEventListener("visibilitychange", visibility);
