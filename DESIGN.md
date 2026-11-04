@@ -103,7 +103,7 @@ One 680px column. A row puts name and description on the left and the control on
 
 | State | Specification | same_as | non_color_cue |
 |---|---|---|---|
-| default | 30px high, 220px wide, `--chrome` fill, `--control-edge` border | | Border, chevron |
+| default | 30px high, 220px wide, `--panel` fill in light and `--chrome` fill in dark, `--control-edge` border | | Border, chevron |
 | hover | Border darkens to `--muted` | | Border contrast |
 | active | Follows focus | field.focus | Outline |
 | focus | 2px `--accent` outline | | Outline |
