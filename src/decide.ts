@@ -44,8 +44,8 @@ export function readingDrift(before: ReadingPosition, after: ReadingPosition, co
 
 export const ITEM_CSS =
   '[data-jev="hide"]{display:none!important}' +
-  '[data-jev="blur"]{filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}' +
-  '[data-jev="blur"][role="presentation"]{opacity:1!important;pointer-events:auto!important;contain:none!important}' +
+  '[data-jev="blur"]:not([role="presentation"]){filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}' +
+  '[data-jev="blur"][role="presentation"] [aria-label] img{filter:blur(10px)!important}' +
   '[data-jev="blur"]{transition:filter .18s ease-out,opacity .18s ease-out!important}' +
   '@media (prefers-reduced-motion:reduce){[data-jev="blur"]{transition:opacity .12s linear!important}}';
 

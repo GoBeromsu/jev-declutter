@@ -70,6 +70,6 @@ test("onScreen: NaN or nonsense geometry is never trusted to be off-screen", () 
 
 test("ITEM_CSS targets both treatment attributes and nothing else", () => {
   expect(ITEM_CSS).toContain('[data-jev="hide"]{display:none!important}');
-  expect(ITEM_CSS).toContain("[data-jev=\"blur\"]{filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}");
+  expect(ITEM_CSS).toContain("[data-jev=\"blur\"]:not([role=\"presentation\"]){filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}");
   expect(ITEM_CSS).not.toContain('[data-jev="keep"]');
 });

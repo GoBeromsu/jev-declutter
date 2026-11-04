@@ -1227,7 +1227,7 @@ const STORIES_TRAY =
   '<div id="tray" role="presentation"><div><ul><li></li><li tabindex="-1"><div role="button" aria-label="Story by x, not seen" tabindex="0">' +
   '<canvas></canvas><span role="link"><img alt="x"></span></div></li></ul></div></div>';
 
-test("the stories tray is blurred in place and stays clickable, and a late story changes nothing", async () => {
+test("only the story avatar images are blurred, the tray stays clickable and unfiltered, and a late story changes nothing", async () => {
   const { h, host } = igSurface("/", STORIES_TRAY);
   await h.ready();
   h.mutate(document.body, [host]); h.flush();
@@ -1239,7 +1239,10 @@ test("the stories tray is blurred in place and stays clickable, and a late story
   expect(tray.getAttribute("data-jev")).toBe("blur");
   expect(li.hasAttribute("data-jev")).toBe(false);
   const css = document.getElementById("jev-declutter")!.textContent!;
-  expect(css).toContain('[data-jev="blur"][role="presentation"]{opacity:1!important;pointer-events:auto!important');
+  expect(css).toContain('[data-jev="blur"]:not([role="presentation"]){filter:blur(10px)');
+  expect(css).toContain('[data-jev="blur"][role="presentation"] [aria-label] img{filter:blur(10px)!important}');
+  expect(tray.querySelector('[role="button"][aria-label] img')!.matches('[data-jev="blur"][role="presentation"] [aria-label] img')).toBe(true);
+  expect(tray.querySelector("canvas")!.matches('[data-jev="blur"][role="presentation"] [aria-label] img')).toBe(false);
 });
 
 test("the stories tray is left alone when suggested content is not hidden", async () => {
