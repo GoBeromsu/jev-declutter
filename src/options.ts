@@ -1,5 +1,5 @@
 import { DAILY_REQUEST_BUDGET, loadOverCap, loadSigCache, providerKey } from "./cache";
-import { today } from "./decide";
+import { actionFor, actionsOf, combine, today } from "./decide";
 import { clearOverride, clearOverrides, loadOverrides, type OverrideDecision, type OverrideMap } from "./overrides";
 import { DEFAULT_TYPESAFE_MODEL } from "./providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, loadSettings } from "./storage";
@@ -10,6 +10,11 @@ const PROVIDERS: readonly ProviderId[] = ["openai", "typesafe"];
 
 const SITE_LABELS: Record<SiteId, string> = { youtube: "YouTube", x: "X", instagram: "Instagram", linkedin: "LinkedIn" };
 const PROVIDER_LABELS: Record<ProviderId, string> = { openai: "OpenAI", typesafe: "Jev" };
+
+const PAUSE_STORAGE_KEY = "pauseUntil";
+const BUDGET_WARNING_RATIO = 0.8;
+const SAVED_CHIP_MS = 2400;
+const KEY_TYPING_DEBOUNCE_MS = 350;
 
 const DEFAULT_MODEL: Record<ProviderId, string> = {
   openai: DEFAULT_SETTINGS.openai.model,
@@ -23,6 +28,8 @@ export interface DiagnosticsView {
   budgetUsed: number;
   overCap?: Partial<Record<SiteId, readonly string[]>>;
   overrides?: Partial<Record<SiteId, OverrideMap>>;
+  settings?: Settings;
+  pausedUntil?: number;
 }
 
 type Row = [key: string, ad: string, suggested: string];
@@ -135,7 +142,7 @@ function tableOf(doc: Document, rows: Row[], overCap: ReadonlySet<string>): HTML
   return table;
 }
 
-function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElement {
+function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView, wasOpen: boolean): HTMLElement {
   const raw = view.caches[site];
   const cache = isRecord(raw) ? raw : undefined;
   const entries = cache && isRecord(cache.entries) ? cache.entries : {};
@@ -161,19 +168,27 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
   if (overCap.size > 0) {
     head.append(el(doc, "span", "tag tag-stale", `그룹 상한 초과 서명 ${overCap.size}개`));
   }
-  block.append(head);
-
   if (!cache) {
-    block.append(el(doc, "p", "empty", "아직 이 사이트의 판정이 저장되지 않았습니다."));
+    block.append(head, el(doc, "p", "empty", "아직 이 사이트의 판정이 저장되지 않았습니다."));
     return block;
   }
-  block.append(el(doc, "p", "meta", `day ${day || "?"} · providerKey ${key || "?"} · ${rows.length}개`));
+  const meta = `day ${day || "?"} · providerKey ${key || "?"} · ${rows.length}개`;
+  if (rows.length === 0) {
+    block.append(head, el(doc, "p", "meta", meta), el(doc, "p", "empty", "저장된 판정이 없습니다."));
+    return block;
+  }
+  const details = el(doc, "details");
+  details.open = wasOpen || overCap.size > 0;
+  const summary = el(doc, "summary");
+  summary.append(head, el(doc, "div", "meta", meta));
+  details.append(summary);
   if (overCap.size > 0) {
-    block.append(el(doc, "p", "meta",
+    details.append(el(doc, "p", "meta",
       "아래 '그룹 상한' 서명은 한 모델 판정이 한 페이지에서 상한을 넘는 항목에 걸렸습니다. " +
       "상한을 넘은 항목은 건드리지 않았습니다. 잘못된 판정이면 오늘 캐시를 비우세요."));
   }
-  block.append(rows.length === 0 ? el(doc, "p", "empty", "저장된 판정이 없습니다.") : tableOf(doc, rows, overCap));
+  details.append(tableOf(doc, rows, overCap));
+  block.append(details);
   return block;
 }
 
@@ -241,25 +256,87 @@ export function renderOverrides(
   const label = el(doc, "span", "", "저장된 응답 ");
   label.append(el(doc, "strong", "", `${count}개`));
   summary.replaceChildren(label);
+  $<HTMLButtonElement>(root, "override-clear-all").disabled = count === 0;
   $<HTMLElement>(root, "overrides").replaceChildren(
     ...(blocks.length > 0 ? blocks : [el(doc, "p", "empty", "아직 응답이 없습니다.")])
   );
 }
 
+const probability = (v: unknown): number | null => (typeof v === "number" ? v : null);
+
+function freshVerdicts(view: DiagnosticsView, settings: Settings): { answered: number; hidden: number; blurred: number } {
+  const actions = actionsOf(settings);
+  const totals = { answered: 0, hidden: 0, blurred: 0 };
+  for (const site of SITE_IDS) {
+    const cache = view.caches[site];
+    if (!isRecord(cache) || cache.day !== view.day || cache.providerKey !== view.currentKey || !isRecord(cache.entries)) continue;
+    for (const entry of Object.values(cache.entries)) {
+      const scores = isRecord(entry) ? entry : {};
+      const action = combine(
+        actionFor("ad", probability(scores.ad), actions),
+        actionFor("suggested", probability(scores.suggested), actions)
+      );
+      totals.answered += 1;
+      if (action === "hide") totals.hidden += 1;
+      if (action === "blur") totals.blurred += 1;
+    }
+  }
+  return totals;
+}
+
+function setTag(tag: HTMLElement, tone: "fresh" | "stale" | "none", text: string): void {
+  tag.className = `tag tag-${tone}`;
+  tag.textContent = text;
+}
+
+const clockTime = (at: number): string =>
+  new Date(at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
+
+function renderConnection(view: DiagnosticsView, settings: Settings, answered: number, root: ParentNode): void {
+  const provider = PROVIDER_LABELS[settings.provider];
+  const paused = typeof view.pausedUntil === "number" && view.pausedUntil > Date.now();
+  const [state, tone, stateText, detail] =
+    settings[settings.provider].apiKey.trim() === ""
+      ? (["no-key", "stale", "키 없음", `아래에 ${provider} 키를 넣으면 바로 시작합니다.`] as const)
+      : paused
+        ? (["paused", "stale", "일시 중지", `요청 한도 또는 서버 오류로 ${clockTime(view.pausedUntil ?? 0)}까지 쉽니다.`] as const)
+        : answered > 0
+          ? (["answered", "fresh", "오늘 응답함", `${provider}가 오늘 ${answered}개 서명에 답했습니다.`] as const)
+          : (["idle", "none", "아직 호출 전", "다음 피드 방문 때 확인됩니다."] as const);
+  $<HTMLElement>(root, "connection").dataset.state = state;
+  setTag($<HTMLElement>(root, "connection-state"), tone, stateText);
+  $<HTMLElement>(root, "connection-detail").textContent = detail;
+  for (const p of PROVIDERS) {
+    const saved = settings[p].apiKey.trim() !== "";
+    setTag($<HTMLElement>(root, `${p}-key-state`), saved ? "fresh" : "stale", saved ? "저장됨" : "키 없음");
+  }
+}
+
 export function renderDiagnostics(view: DiagnosticsView, root: ParentNode = document): void {
   const doc = root.ownerDocument ?? (root as Document);
   const used = Number.isFinite(view.budgetUsed) && view.budgetUsed >= 0 ? view.budgetUsed : 0;
+  const settings = view.settings ?? DEFAULT_SETTINGS;
+  const ratio = Math.min(used / DAILY_REQUEST_BUDGET, 1);
 
   const budget = $<HTMLElement>(root, "budget");
   budget.dataset.used = String(used);
   budget.dataset.limit = String(DAILY_REQUEST_BUDGET);
-  const usage = el(doc, "span", "", "오늘 모델 요청 ");
-  usage.append(el(doc, "strong", "", `${used} / ${DAILY_REQUEST_BUDGET}`));
-  const current = el(doc, "span", "", "현재 providerKey ");
-  current.append(el(doc, "code", "", view.currentKey));
-  budget.replaceChildren(usage, el(doc, "span", "", "·"), current);
+  budget.dataset.level = ratio >= BUDGET_WARNING_RATIO ? "high" : "normal";
+  $<HTMLElement>(root, "budget-count").textContent = `${used} / ${DAILY_REQUEST_BUDGET}`;
+  $<HTMLElement>(root, "budget-key").textContent = view.currentKey;
+  const meter = $<HTMLElement>(root, "budget-meter");
+  meter.setAttribute("aria-valuenow", String(used));
+  meter.setAttribute("aria-valuemax", String(DAILY_REQUEST_BUDGET));
+  $<HTMLElement>(root, "budget-fill").style.transform = `scaleX(${ratio})`;
 
-  $<HTMLElement>(root, "diagnostics").replaceChildren(...SITE_IDS.map((site) => siteBlock(doc, site, view)));
+  const verdicts = freshVerdicts(view, settings);
+  renderConnection(view, settings, verdicts.answered, root);
+  $<HTMLElement>(root, "filtered-hidden").textContent = String(verdicts.hidden);
+  $<HTMLElement>(root, "filtered-blurred").textContent = String(verdicts.blurred);
+
+  const diagnostics = $<HTMLElement>(root, "diagnostics");
+  const opened = new Set(Array.from(diagnostics.querySelectorAll("details[open]"), (d) => d.closest("section")?.id));
+  diagnostics.replaceChildren(...SITE_IDS.map((site) => siteBlock(doc, site, view, opened.has(`diag-${site}`))));
 }
 
 export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsView> {
@@ -278,7 +355,10 @@ export async function loadDiagnostics(settings: Settings): Promise<DiagnosticsVi
   const key = budgetKey(day);
   const budget = (await chrome.storage.local.get(key))[key] as unknown;
   const count = isRecord(budget) ? budget.count : undefined;
+  const pausedUntil = (await chrome.storage.local.get(PAUSE_STORAGE_KEY))[PAUSE_STORAGE_KEY] as unknown;
   return {
+    settings,
+    ...(typeof pausedUntil === "number" ? { pausedUntil } : {}),
     day,
     currentKey: providerKey(settings),
     caches,
@@ -293,9 +373,15 @@ const describe = (err: unknown): string => (err instanceof Error ? err.message :
 export async function main(root: ParentNode = document): Promise<void> {
   const form = $<HTMLFormElement>(root, "settings");
   const status = $<HTMLElement>(root, "status");
-  const note = (state: "saved" | "reset" | "error", message: string) => {
+  let chipTimer: ReturnType<typeof setTimeout> | undefined;
+  const note = (state: "saving" | "saved" | "reset" | "error", message: string) => {
+    clearTimeout(chipTimer);
     status.textContent = message;
     status.dataset.state = state;
+    status.dataset.shown = "true";
+    if (state === "saved" || state === "reset") {
+      chipTimer = setTimeout(() => delete status.dataset.shown, SAVED_CHIP_MS);
+    }
   };
   const refresh = async () => {
     const view = await loadDiagnostics(await loadSettings());
@@ -303,19 +389,35 @@ export async function main(root: ParentNode = document): Promise<void> {
     renderOverrides(view.overrides ?? {}, root);
   };
 
+  let pendingSave: ReturnType<typeof setTimeout> | undefined;
+  const save = async () => {
+    clearTimeout(pendingSave);
+    pendingSave = undefined;
+    try {
+      const settings = collectForm(root);
+      populateForm(settings, root);
+      await chrome.storage.local.set({ settings });
+      await refresh();
+      if (pendingSave === undefined) note("saved", "저장했습니다. 다음 페이지 이동부터 적용됩니다.");
+    } catch (err) {
+      note("error", `저장 실패: ${describe(err)}`);
+    }
+  };
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    void (async () => {
-      try {
-        const settings = collectForm(root);
-        await chrome.storage.local.set({ settings });
-        populateForm(settings, root);
-        await refresh();
-        note("saved", "저장했습니다. 다음 페이지 이동부터 적용됩니다.");
-      } catch (err) {
-        note("error", `저장 실패: ${describe(err)}`);
-      }
-    })();
+    void save();
+  });
+  form.addEventListener("change", () => void save());
+  for (const id of ["openai-key", "typesafe-key"]) {
+    input(root, id).addEventListener("input", () => {
+      note("saving", "저장 중…");
+      clearTimeout(pendingSave);
+      pendingSave = setTimeout(() => void save(), KEY_TYPING_DEBOUNCE_MS);
+    });
+  }
+  (root.ownerDocument ?? (root as Document)).defaultView?.addEventListener("pagehide", () => {
+    if (pendingSave !== undefined) void save();
   });
 
   $<HTMLButtonElement>(root, "reset").addEventListener("click", () => {

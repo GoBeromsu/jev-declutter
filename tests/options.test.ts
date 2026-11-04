@@ -1,5 +1,5 @@
 import { beforeEach, expect, test } from "bun:test";
-import { DAILY_REQUEST_BUDGET, overCapKey } from "../src/cache";
+import { DAILY_REQUEST_BUDGET, overCapKey, providerKey } from "../src/cache";
 import { today } from "../src/decide";
 import { collectForm, main, populateForm, renderDiagnostics, renderOverrides } from "../src/options";
 import { overrideKey } from "../src/overrides";
@@ -455,4 +455,121 @@ test("a malformed stored answer record never reaches the list", async () => {
   expect($<HTMLElement>(doc, "override-summary").dataset.count).toBe("1");
   expect(overrideRows(doc, "x").map((r) => cells(r)[0] ?? "")).toEqual(["good"]);
   expect(doc.querySelector("#override-linkedin")).toBeNull();
+});
+
+test("flipping a switch saves at once, with no save button on the page", async () => {
+  store.settings = FULL;
+  const doc = page();
+  await main(doc);
+  expect(doc.querySelector("#save")).toBeNull();
+
+  const toggle = input(doc, "site-x");
+  const before = toggle.checked;
+  const state = await nextState(doc, () => {
+    toggle.checked = !before;
+    toggle.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(state).toBe("saved");
+  expect((store.settings as Settings).sites.x.enabled).toBe(!before);
+  expect($<HTMLElement>(doc, "status").dataset.shown).toBe("true");
+});
+
+test("typing a key reports saving at once and stores it after the typing pause", async () => {
+  store.settings = FULL;
+  const doc = page();
+  await main(doc);
+
+  const key = input(doc, "openai-key");
+  key.value = "sk-typed";
+  const first = await nextState(doc, () => key.dispatchEvent(new Event("input", { bubbles: true })));
+  expect(first).toBe("saving");
+  expect((store.settings as Settings).openai.apiKey).toBe("sk-openai");
+
+  const second = await nextState(doc, () => {});
+  expect(second).toBe("saved");
+  expect((store.settings as Settings).openai.apiKey).toBe("sk-typed");
+  expect(key.value).toBe("sk-typed");
+});
+
+test("a failed autosave reports the error and keeps what the user typed", async () => {
+  store.settings = FULL;
+  const doc = page();
+  await main(doc);
+
+  const local = chrome.storage.local as unknown as { set: unknown };
+  const realSet = local.set;
+  local.set = async () => {
+    throw new Error("quota");
+  };
+  try {
+    const key = input(doc, "typesafe-key");
+    key.value = "ts-typed";
+    const state = await nextState(doc, () => key.form?.dispatchEvent(new Event("change", { bubbles: true })));
+    expect(state).toBe("error");
+    expect($<HTMLElement>(doc, "status").textContent).toContain("quota");
+    expect(key.value).toBe("ts-typed");
+  } finally {
+    local.set = realSet;
+  }
+});
+
+const connectionOf = (doc: Document) => ({
+  state: $<HTMLElement>(doc, "connection").dataset.state,
+  tag: $<HTMLElement>(doc, "connection-state").textContent
+});
+
+test("the connection row tells no key, paused, answered and not called yet apart", async () => {
+  const noKey = page();
+  await main(noKey);
+  expect(connectionOf(noKey)).toEqual({ state: "no-key", tag: "키 없음" });
+  expect($<HTMLElement>(noKey, "typesafe-key-state").textContent).toBe("키 없음");
+
+  store.settings = FULL;
+  const idle = page();
+  await main(idle);
+  expect(connectionOf(idle)).toEqual({ state: "idle", tag: "아직 호출 전" });
+  expect($<HTMLElement>(idle, "typesafe-key-state").textContent).toBe("저장됨");
+
+  store[sigKey("x")] = cacheOf(today(), providerKey(FULL), { a: { ad: 0, suggested: 0 } });
+  store.pauseUntil = Date.now() + 60_000;
+  const paused = page();
+  await main(paused);
+  expect(connectionOf(paused)).toEqual({ state: "paused", tag: "일시 중지" });
+
+  delete store.pauseUntil;
+  const answered = page();
+  await main(answered);
+  expect(connectionOf(answered)).toEqual({ state: "answered", tag: "오늘 응답함" });
+});
+
+test("the filtered counts split today's fresh verdicts by the action they caused", async () => {
+  store.settings = { ...FULL, hideAds: true, hideSuggested: false };
+  const doc = page();
+  renderDiagnostics(
+    {
+      day: "2026-11-04",
+      currentKey: "k",
+      caches: {
+        x: cacheOf("2026-11-04", "k", { ad: { ad: 1, suggested: 0 }, plain: { ad: 0, suggested: 0 } }),
+        youtube: cacheOf("2026-01-01", "k", { stale: { ad: 1, suggested: 0 } })
+      },
+      budgetUsed: 0,
+      settings: store.settings as Settings
+    },
+    doc
+  );
+  expect($<HTMLElement>(doc, "filtered-hidden").textContent).toBe("1");
+  expect($<HTMLElement>(doc, "filtered-blurred").textContent).toBe("0");
+  expect($<HTMLElement>(doc, "connection").dataset.state).toBe("answered");
+});
+
+test("clear-all stays disabled until there is an answer to clear", async () => {
+  const empty = page();
+  await main(empty);
+  expect($<HTMLButtonElement>(empty, "override-clear-all").disabled).toBe(true);
+
+  store[overrideKey("x")] = { entries: { a: { decision: "keep", at: AT } } };
+  const filled = page();
+  await main(filled);
+  expect($<HTMLButtonElement>(filled, "override-clear-all").disabled).toBe(false);
 });
