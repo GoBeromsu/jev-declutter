@@ -86,6 +86,7 @@ const FULL: Settings = {
     instagram: { enabled: true },
     linkedin: { enabled: false }
   },
+  hideAds: false,
   hideSuggested: false
 };
 
@@ -138,11 +139,12 @@ test("collectForm maps every control into an exact Settings object", () => {
   input(doc, "site-x").checked = false;
   input(doc, "site-instagram").checked = true;
   input(doc, "site-linkedin").checked = false;
+  input(doc, "hide-ads").checked = false;
   input(doc, "hide-suggested").checked = false;
 
   const collected = collectForm(doc);
   expect(collected).toStrictEqual(FULL);
-  expect(Object.keys(collected).sort()).toEqual(["hideSuggested", "openai", "provider", "sites", "typesafe"]);
+  expect(Object.keys(collected).sort()).toEqual(["hideAds", "hideSuggested", "openai", "provider", "sites", "typesafe"]);
   expect(Object.keys(collected.sites)).toEqual(SITES);
 });
 

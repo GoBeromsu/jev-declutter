@@ -310,7 +310,7 @@ const drivers = String.raw`(() => {
         if (write?.lastRectRead?.rect.top >= write?.viewportHeight) continue;
         const actual = item.getAttribute("data-jev");
         Q.scrollUpCases.push({ id: item.getAttribute("data-qa-id"), before: old?.action, actual });
-        Q.assert(actual === "cover", "newly recycled visible scroll-up ad is covered", item.outerHTML);
+        Q.assert(actual === "hide", "newly recycled visible scroll-up ad is hidden", item.outerHTML);
       }
     }
     Q.snapshot("scroll");
@@ -356,7 +356,7 @@ const drivers = String.raw`(() => {
         Q.assert(!action || heldRecycle, "keep unmarked " + id, action);
       } else if (fail && el.hasAttribute("data-qa-model")) {
         Q.assert(!action, "429 leaves model item untouched " + id, action);
-      } else Q.assert(action === "hide" || action === "blur" || action === "cover", "treated item " + id, action);
+      } else Q.assert(action === "hide" || action === "blur", "treated item " + id, action);
     }
     Q.assert(excluded ? __JEV_QA__.processed === 0 : __JEV_QA__.processed >= items.length,
       "processed count", { processed: __JEV_QA__.processed, items: items.length });
@@ -370,7 +370,7 @@ const drivers = String.raw`(() => {
     await Q.frame(); idleCounts.push(count());
     await Q.frame(); idleCounts.push(count());
     const roTreatmentWrites = __QA_METRICS__.treatments.filter(w =>
-      w.attribute === "data-jev" && (w.value === "hide" || w.value === "blur" || w.value === "cover") && w.via === "ro").length;
+      w.attribute === "data-jev" && (w.value === "hide" || w.value === "blur") && w.via === "ro").length;
     const boundPassed = count() <= roTreatmentWrites;
     const idlePassed = idleCounts.every(n => n === idleCounts[0]);
     Q.assert(boundPassed, "RO warnings <= ro-path treatment writes", { count:count(), roTreatmentWrites });
@@ -617,11 +617,7 @@ const baseline = String.raw`
     for (const [id, first] of Object.entries(__fx.ioFirst)) {
       if (["adAttr","adLabel","suggestedLabel","suggestedFollow"].includes(first.kind) &&
           ["initial","scroll","raf","ro","ro-idle"].includes(first.channel)) {
-        const write = __QA_METRICS__.treatments.find(w => w.id === id && w.attribute === "data-jev");
-        const top = write?.lastRectRead?.rect.top ?? first.top;
-        const eligible = first.channel === "initial" || write?.paintVisibleToAPI === false || top >= innerHeight;
-        Q.assert(eligible ? first.height === 0 : first.jev === "cover", "first frame deterministic " + id,
-          { ...first, originalTop:top, eligibleForHide:eligible });
+        Q.assert(first.height === 0, "first frame deterministic " + id, first);
         const via = __QA_METRICS__.first[id]?.via;
         // Scroll events themselves can execute within a rendering update. Both scanner paths
         // are valid there; the task-insertion and site-rAF/RO probes above assert exact paths.
@@ -695,7 +691,7 @@ const overlayPrompt = String.raw`
   Q.assert(box.top >= 0 && box.top < innerHeight, "the model item starts inside the viewport", box.top);
   Q.assert(far.getBoundingClientRect().top >= innerHeight, "its clone starts below the fold", far.getBoundingClientRect().top);
   Q.assert(prompts().length === 0, "no prompt before any verdict", prompts().length);
-  // The verdict lands after first paint, so the placement rule blurs it in place.
+  // The verdict lands after first paint, so it is blurred in place (model verdict on screen).
   __QA_SHIM__.releaseClassify();
   await Q.models();
   const key = __JEV_QA_SRC__.keyOf(item, __JEV_QA_SITE__);
@@ -770,7 +766,7 @@ const overlayPrompt = String.raw`
     Q.assert(!far.hasAttribute("data-jev"), "every same-key item on the page is released", far.getAttribute("data-jev"));
     Q.assert(!far.hasAttribute("data-jev-held"), "a released item below the fold is not merely held");
   } else {
-    Q.assert(item.getAttribute("data-jev") === "cover", "yes turns the blur into a cover", item.getAttribute("data-jev"));
+    Q.assert(item.getAttribute("data-jev") === "hide", "yes hides the blurred item", item.getAttribute("data-jev"));
     Q.assert(far.getAttribute("data-jev") === "hide", "yes keeps the same-key item hidden", far.getAttribute("data-jev"));
   }
   Q.assert(deterministic.every(el => Q.action(el) === "hide"), "an answer never touches a deterministic verdict", deterministic.map(el => Q.action(el)));
@@ -971,7 +967,7 @@ function modes(fixture: string): Scenario[] {
     await Q.wait(() => top.getAttribute("data-jev") && bottom.getAttribute("data-jev"), "late modules applied",
       () => { __fx.lateModule(top); __fx.lateModule(bottom); });
     await Q.frame();
-    Q.assert(top.getAttribute("data-jev") === "cover", "painted late module is covered");
+    Q.assert(top.getAttribute("data-jev") === "hide", "painted late module is hidden");
     Q.assert(bottom.getAttribute("data-jev") === "hide", "below late module hides");
     return Q.report();` });
   // todo 29: the user answer prompt. The screenshot run leaves the prompt up, on the Korean

@@ -73,6 +73,7 @@ export function collectForm(root: ParentNode = document): Settings {
     openai: { apiKey: input(root, "openai-key").value.trim(), model: modelOf("openai") },
     typesafe: { apiKey: input(root, "typesafe-key").value.trim(), model: modelOf("typesafe") },
     sites,
+    hideAds: input(root, "hide-ads").checked,
     hideSuggested: input(root, "hide-suggested").checked
   };
 }
@@ -87,6 +88,7 @@ export function populateForm(settings: Settings, root: ParentNode = document): v
   input(root, "openai-key").value = settings.openai.apiKey;
   input(root, "typesafe-key").value = settings.typesafe.apiKey;
   for (const site of SITE_IDS) input(root, `site-${site}`).checked = settings.sites[site].enabled;
+  input(root, "hide-ads").checked = settings.hideAds;
   input(root, "hide-suggested").checked = settings.hideSuggested;
 }
 

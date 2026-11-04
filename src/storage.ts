@@ -13,6 +13,7 @@ export const DEFAULT_SETTINGS: Settings = {
     instagram: { enabled: true },
     linkedin: { enabled: true }
   },
+  hideAds: true,
   hideSuggested: true
 };
 
@@ -49,11 +50,13 @@ function normalizeSettings(saved: unknown): Settings {
   // Settings saved before hideSuggested existed carry per-category actions: "keep" on suggested meant off.
   const legacy = isRecord(raw.actions) ? raw.actions.suggested : undefined;
   const hideSuggested = typeof raw.hideSuggested === "boolean" ? raw.hideSuggested : legacy !== "keep";
+  const hideAds = typeof raw.hideAds === "boolean" ? raw.hideAds : true;
   return {
     provider: pick(raw.provider, PROVIDERS, DEFAULT_SETTINGS.provider),
     openai: mergeProvider(raw.openai, DEFAULT_SETTINGS.openai),
     typesafe: mergeProvider(raw.typesafe, DEFAULT_SETTINGS.typesafe),
     sites,
+    hideAds,
     hideSuggested
   };
 }

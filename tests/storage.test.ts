@@ -34,6 +34,7 @@ test("defaults match the plan", () => {
     instagram: { enabled: true },
     linkedin: { enabled: true }
   });
+  expect(DEFAULT_SETTINGS.hideAds).toBe(true);
   expect(DEFAULT_SETTINGS.hideSuggested).toBe(true);
 });
 
@@ -52,6 +53,13 @@ test("legacy per-category actions map onto the one recommendations switch", asyn
   expect((await loadSettings()).hideSuggested).toBe(true);
   store.settings = { hideSuggested: false, actions: { suggested: "hide" } };
   expect((await loadSettings()).hideSuggested).toBe(false);
+});
+
+test("the ads switch is stored on its own and defaults on", async () => {
+  store.settings = { hideAds: false };
+  expect((await loadSettings()).hideAds).toBe(false);
+  store.settings = { hideAds: "no" };
+  expect((await loadSettings()).hideAds).toBe(true);
 });
 
 test("a missing site keeps its default enabled state", async () => {

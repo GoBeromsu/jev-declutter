@@ -113,8 +113,8 @@ function item(label = "Sponsored", top = 1000) {
 }
 
 for (const path of ["ro", "mutation"] as const) {
-  for (const [painted, top, expected] of [[false, 0, "hide"], [true, 0, "cover"], [true, 2000, "hide"]] as const) {
-    test(`${path} independently places painted=${painted} top=${top} as ${expected}`, () => {
+  for (const [painted, top] of [[false, 0], [true, 0], [true, 2000]] as const) {
+    test(`${path} independently hides a deterministic ad painted=${painted} top=${top}`, () => {
       // Given
       const h = harness();
       if (painted) h.painted();
@@ -124,7 +124,7 @@ for (const path of ["ro", "mutation"] as const) {
       h.mutate(document.body, [el]);
       if (path === "ro") { expect(el.hasAttribute("data-jev")).toBe(false); h.flush(); }
       // Then
-      expect(el.getAttribute("data-jev")).toBe(expected);
+      expect(el.getAttribute("data-jev")).toBe("hide");
       expect(h.scanner.qa.applyPaths.get(el)).toBe(path);
     });
   }
@@ -136,7 +136,7 @@ test("default settings mark deterministic items while storage remains unresolved
   expect(el.dataset.jev).toBe("hide");
 });
 
-test("unknown waits for cache then model response uses late placement", async () => {
+test("unknown waits for cache then model response blurs on screen", async () => {
   const h = harness(); const el = item("2h", 0);
   h.mutate(document.body, [el]); h.flush();
   expect(el.hasAttribute("data-jev")).toBe(false); expect(h.calls).toHaveLength(0);
@@ -326,11 +326,11 @@ test("rAF re-registers each frame and repeated visibility interruptions restart 
   else Reflect.deleteProperty(document, "hidden");
 });
 
-test("module recognized after child insertion goes through placement", () => {
+test("module recognized after child insertion is hidden", () => {
   const h = harness(); h.painted();
   const aside = document.createElement("aside"); aside.setAttribute("aria-label", "Subscribe to Premium"); document.body.append(aside);
   h.mutate(aside, [document.createElement("span")]); h.flush();
-  expect(aside.dataset.jev).toBe("cover");
+  expect(aside.dataset.jev).toBe("hide");
 });
 
 test("all geometry reads precede writes in one flush", () => {
@@ -362,12 +362,12 @@ test("after-paint disable preserves treatment even below viewport and stops new 
   expect(el.dataset.jev).toBe("hide"); expect(second.hasAttribute("data-jev")).toBe(false);
 });
 
-test("a cover never collapses to hide when a later cache verdict arrives below viewport", async () => {
+test("a hide stays hidden when a later cache verdict arrives below viewport", async () => {
   const h = harness(); await h.ready(); h.painted(); const el = item("Sponsored", 0);
   h.mutate(document.body, [el]); h.flush();
   Object.defineProperty(el, "getBoundingClientRect", { value: () => ({ top: 2000 }) });
   h.mutate(el); h.flush();
-  expect(el.dataset.jev).toBe("cover");
+  expect(el.dataset.jev).toBe("hide");
 });
 
 test("settings changes are deferred until navigation", async () => {
@@ -428,7 +428,7 @@ test("late has-module ancestor is found even across a nested feed item", () => {
   const el = item("2h"); section.append(el);
   const aside = document.createElement("aside"); el.append(aside);
   h.mutate(el, [aside]); h.flush();
-  expect(section.dataset.jev).toBe("cover");
+  expect(section.dataset.jev).toBe("hide");
 });
 
 test("content frame downgrades a late visible ad while paint entries remain empty", () => {
@@ -439,8 +439,8 @@ test("content frame downgrades a late visible ad while paint entries remain empt
   const ad = item("Sponsored", 0);
   // When: discover after the content frame's post-frame task.
   h.mutate(document.body, [ad]); h.flush();
-  // Then: RO placement must use presented content, not delayed paint entries.
-  expect(ad.dataset.jev).toBe("cover");
+  // Then: the RO path must use presented content, not delayed paint entries.
+  expect(ad.dataset.jev).toBe("hide");
   expect(h.scanner.qa.applyPaths.get(ad)).toBe("ro");
 });
 
@@ -480,13 +480,12 @@ test("item parked inside a display:none ancestor never witnesses a painted frame
   // deterministic ad collapses to a zero box in its discovery flush.
   expect(ad.dataset.jev).toBe("hide");
   expect(getComputedStyle(ad).display).toBe("none");
-  // And: once that cell is genuinely rendered it does latch the witness, so a
-  // later in-view verdict is covered instead of collapsing presented content.
+  // And: a later in-view deterministic verdict is removed too.
   h.frame(); h.task();
   const late = item("Sponsored", 0);
   h.mutate(document.body, [late]); h.flush();
-  expect(late.dataset.jev).toBe("cover");
-  expect(getComputedStyle(late).display).not.toBe("none");
+  expect(late.dataset.jev).toBe("hide");
+  expect(getComputedStyle(late).display).toBe("none");
 });
 
 test("settings inside paint publication gap preserve the existing hidden-item hold", async () => {
@@ -515,20 +514,20 @@ for (const top of [-400, 100]) {
     Object.defineProperty(el, "getBoundingClientRect", { value: () => ({ top }) });
     // When: a cache notification re-flushes the same key with want=hide.
     h.scanner.updateCache(cache); h.flush();
-    // Then: placement may not reveal an already-collapsed item.
+    // Then: a late verdict may not reveal an already-collapsed item.
     expect(el.dataset.jev).toBe("hide");
     expect(getComputedStyle(el).display).toBe("none");
   });
 }
 
-test("currently visible item still downgrades a late in-view hide verdict to cover", () => {
+test("a late in-view hide verdict removes the visible item", () => {
   // Given
   const h = harness(); h.painted(); const el = item("Sponsored", 100);
   // When
   h.mutate(document.body, [el]); h.flush();
   // Then
-  expect(el.dataset.jev).toBe("cover");
-  expect(getComputedStyle(el).display).not.toBe("none");
+  expect(el.dataset.jev).toBe("hide");
+  expect(getComputedStyle(el).display).toBe("none");
 });
 
 test("nested parser records register each pending item once before the first flush", () => {
@@ -969,10 +968,10 @@ test("a confirmed answer treats the item from the user's own verdict, without a 
   h.painted();
   // When
   h.mutate(document.body, [below, inView]); h.flush(); await h.send(); h.flush();
-  // Then: the user's yes is per-item evidence like a deterministic signal - placement still rules.
+  // Then: the user's yes is per-item evidence like a deterministic signal, so it hides.
   expect(h.calls).toHaveLength(0);
   expect(below.dataset.jev).toBe("hide");
-  expect(inView.dataset.jev).toBe("cover");
+  expect(inView.dataset.jev).toBe("hide");
   expect(h.prompts.size).toBe(0);
 });
 
@@ -985,7 +984,7 @@ test("an answer never overrides a deterministic verdict and a deterministic item
   // When
   h.mutate(document.body, [inView, below]); h.flush();
   // Then: deterministic > user override, and no prompt is offered for it.
-  expect(inView.dataset.jev).toBe("cover");
+  expect(inView.dataset.jev).toBe("hide");
   expect(below.dataset.jev).toBe("hide");
   expect(h.prompts.size).toBe(0);
 });
@@ -1005,8 +1004,8 @@ test("the prompt appears only on a model blur, never on a hide, a deterministic 
   // Then
   expect(modelInView.dataset.jev).toBe("blur");
   expect(modelBelow.dataset.jev).toBe("hide");
-  expect(deterministicInView.dataset.jev).toBe("cover");
-  expect(mod.dataset.jev).toBe("cover");
+  expect(deterministicInView.dataset.jev).toBe("hide");
+  expect(mod.dataset.jev).toBe("hide");
   expect([...h.prompts.keys()]).toEqual([modelInView]);
   expect(h.prompt(modelInView)).toBe(key);
 });
@@ -1031,7 +1030,7 @@ test("answering no unblurs the item, releases every same-key item and sends noth
   expect(inView.hasAttribute("data-jev")).toBe(false);
   expect(second.hasAttribute("data-jev")).toBe(false);
   expect(below.hasAttribute("data-jev")).toBe(false);
-  expect(localAd.dataset.jev).toBe("cover");
+  expect(localAd.dataset.jev).toBe("hide");
   expect(h.saved).toEqual([{ key, decision: "keep" }]);
   expect(h.calls).toHaveLength(before);
   expect(h.prompts.size).toBe(0);
@@ -1050,7 +1049,7 @@ test("answering yes keeps the treatment, persists the confirmation and drops the
   // When
   h.answer(key, "confirmed");
   // Then
-  expect(inView.dataset.jev).toBe("cover");
+  expect(inView.dataset.jev).toBe("hide");
   expect(below.dataset.jev).toBe("hide");
   expect(h.saved).toEqual([{ key, decision: "confirmed" }]);
   expect(h.calls).toHaveLength(before);
