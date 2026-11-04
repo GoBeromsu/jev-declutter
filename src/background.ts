@@ -46,10 +46,6 @@ const fail = (error: string): { ok: false; error: string } => ({ ok: false, erro
 const hasValidKey = (it: unknown): it is ItemDescriptor =>
   isRecord(it) && typeof it.key === "string" && it.key !== "";
 
-// loadSettings() normalizes an unknown provider id to the default. Silently sending the user's feed to a
-// provider they did not choose is worse than failing open (plan D1/D3: the user explicitly picks the
-// provider), so a provider field that is present but unknown is rejected here. An absent field still
-// means the default provider.
 async function storedProviderIsUnknown(): Promise<boolean> {
   const { settings } = await chrome.storage.local.get("settings");
   if (!isRecord(settings) || !Object.hasOwn(settings, "provider")) return false;
@@ -152,7 +148,6 @@ function verdictsFor(site: SiteId, items: ItemDescriptor[], deps: ClassifyDeps):
   return job;
 }
 
-/** Never rejects: every failure becomes `{ ok: false }` so the page fails open. */
 export async function handleClassify(msg: ClassifyMessage, deps: ClassifyDeps = defaultDeps): Promise<ClassifyResult> {
   try {
     if (!isRecord(msg) || typeof msg.site !== "string" || !Array.isArray(msg.items)) return fail("bad-request");
@@ -161,7 +156,7 @@ export async function handleClassify(msg: ClassifyMessage, deps: ClassifyDeps = 
     if (!verdicts.ok) return verdicts;
     return {
       ok: true,
-      scores: items.map((it) => ({ ...((hasValidKey(it) && verdicts.byKey.get(it.key)) || NO_SCORE) }))
+      scores: items.map((it) => Object.assign({}, (hasValidKey(it) && verdicts.byKey.get(it.key)) || NO_SCORE))
     };
   } catch (e) {
     console.warn("[jev-declutter]", "classify failed", e instanceof Error ? e.message : String(e));
@@ -175,8 +170,6 @@ async function sigKeys(): Promise<string[]> {
 }
 
 export async function resetCaches(now: Date = new Date()): Promise<void> {
-  // An over-cap note names a cached signature, so clearing the cache must clear the note too -
-  // otherwise the options page keeps pointing at a verdict that no longer exists.
   const stored = Object.keys(await chrome.storage.local.get(null));
   const stale = stored.filter((k) => k.startsWith("sig:") || k.startsWith(OVER_CAP_PREFIX));
   await chrome.storage.local.remove([...stale, budgetKey(today(now))]);
@@ -189,7 +182,6 @@ function activeModel(raw: unknown): string {
   return `${raw.provider}:${typeof model === "string" ? model : ""}`;
 }
 
-/** Registers every listener; call synchronously at service-worker start so wake-up events are not missed. */
 export function startBackground(): void {
   chrome.runtime.onMessage.addListener(onMessage);
   chrome.storage.onChanged.addListener(handleStorageChange);

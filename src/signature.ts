@@ -34,11 +34,6 @@ function token(el: Element, here: string): string {
   return t;
 }
 
-/**
- * Structural key of an item: breadth-first tokens to `depth`, at most `maxNodes`
- * elements, FNV-1a 32-bit hex. Text, classes, ids and attribute values (other than
- * role/data-testid) never enter it, so a recycled or re-labelled cell keeps its key.
- */
 export function signature(el: Element, site: SiteId, depth = 4, maxNodes = 64): string {
   const here = typeof location === "undefined" ? "" : location.host;
   const levels: string[][] = [];
@@ -59,11 +54,6 @@ export function signature(el: Element, site: SiteId, depth = 4, maxNodes = 64): 
   return `${site}:${fnv1a(levels.map((tokens) => tokens.join(",")).join(">"))}`;
 }
 
-/**
- * Cache key: the skeleton plus the UI-chrome signals. Sponsored and organic cards can
- * share an identical skeleton and differ only in label text, so a verdict is never
- * cached by bare skeleton; signalKey still collapses the many items that share labels.
- */
 export function signalKey(
   signature: string,
   d: Pick<

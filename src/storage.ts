@@ -47,7 +47,6 @@ function normalizeSettings(saved: unknown): Settings {
     const entry = sitesRaw[id];
     sites[id] = { enabled: isRecord(entry) ? entry.enabled !== false : DEFAULT_SETTINGS.sites[id].enabled };
   }
-  // Settings saved before hideSuggested existed carry per-category actions: "keep" on suggested meant off.
   const legacy = isRecord(raw.actions) ? raw.actions.suggested : undefined;
   const hideSuggested = typeof raw.hideSuggested === "boolean" ? raw.hideSuggested : legacy !== "keep";
   const hideAds = typeof raw.hideAds === "boolean" ? raw.hideAds : true;

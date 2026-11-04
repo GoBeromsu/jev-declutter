@@ -6,15 +6,34 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
-    "qa": "wxt build && bun run scripts/qa/run.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "postinstall": "wxt prepare"
   },
+  "size-limit": [
+    {
+      "name": "content script",
+      "path": ".output/chrome-mv3/content-scripts/content.js",
+      "limit": "32900 B",
+      "gzip": false,
+      "brotli": false
+    },
+    {
+      "name": "background",
+      "path": ".output/chrome-mv3/background.js",
+      "limit": "12300 B",
+      "gzip": false,
+      "brotli": false
+    }
+  ],
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
+    "@size-limit/file": "14.3.0",
     "@types/bun": "^1.4.4",
     "@types/chrome": "^0.3.7",
+    "oxc-parser": "0.157.0",
+    "oxlint": "1.91.0",
+    "size-limit": "14.3.0",
     "typescript": "^7.0.2",
     "web-ext": "^10.8.0",
     "wxt": "^0.21.5"

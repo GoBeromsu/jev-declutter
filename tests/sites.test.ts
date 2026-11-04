@@ -169,7 +169,6 @@ describe("LinkedIn right-rail ad placement", () => {
     const added = cfg.modules.slice(-2).map((m) => m.selector);
     expect(added).toEqual(['div:has(> iframe[componentkey$="_feed_ad"])', '[componentkey$="_feed_ad"]:not(iframe)']);
     const host = document.createElement("div");
-    // A differently prefixed slot still matches; a slot the name only starts with must not.
     host.innerHTML =
       '<div id="other-nav"><span componentkey="MobileFeedNav_feed_ad"></span></div>' +
       '<div id="adjacent"><span componentkey="MainFeedDesktopNav_feed_adjacent"></span></div>';
@@ -193,9 +192,6 @@ describe("Instagram live feed slots (no <header>)", () => {
     }
     expect(cfg.followSlot).toContain('article div[data-interactable] [role="button"]');
     const host = document.createElement("div");
-    // The live shapes side by side: the account name, the marker, the attribution line, the
-    // nested pill, the caption, and a control outside any interactable region. Only the marker
-    // may be read; the name is withheld by the link rule and the rest by bodyExclude.
     host.innerHTML =
       "<article>" +
         '<div data-interactable>' +
@@ -212,8 +208,6 @@ describe("Instagram live feed slots (no <header>)", () => {
     try {
       expect([...host.querySelectorAll(cfg.labelSlots)].map((el) => el.id)).toEqual(["name", "label", "line", "pill"]);
       expect(host.querySelector("#caption")!.matches(cfg.bodyExclude)).toBe(true);
-      // The attribution line and the pill are slot-shaped, so bodyExclude - not the slot selector
-      // - is what keeps them unread, while the marker one <div> deeper stays readable.
       expect(host.querySelector("#line")!.closest(cfg.bodyExclude)).not.toBeNull();
       expect(host.querySelector("#pill")!.closest(cfg.bodyExclude)).not.toBeNull();
       expect(host.querySelector("#label")!.closest(cfg.bodyExclude)).toBeNull();

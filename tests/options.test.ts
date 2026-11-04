@@ -57,7 +57,6 @@ const select = (doc: Document, id: string) => $<HTMLSelectElement>(doc, id);
 const rowsOf = (doc: Document, site: SiteId) => Array.from($(doc, `diag-${site}`).querySelectorAll("tbody tr"));
 const cells = (row: Element | undefined) => Array.from(row?.querySelectorAll("td") ?? []).map((td) => td.textContent?.trim() ?? "");
 
-/** Resolves with the status element's next data-state value; the observer is attached BEFORE the trigger runs. */
 const nextState = (doc: Document, trigger: () => void, timeoutMs = 2000): Promise<string> =>
   new Promise((resolve, reject) => {
     const status = $<HTMLElement>(doc, "status");
@@ -117,11 +116,9 @@ test("markup: lang=ko, masked key fields, no remote assets, no free-text goal fi
   expect(Array.from(select(doc, "model").options).map((o) => o.value)).toEqual(["openai:gpt-6-luna", "typesafe:jev-latest"]);
   for (const site of SITES) {
     expect(input(doc, `site-${site}`).type).toBe("checkbox");
-    // Icon-only, but still named for screen readers.
     expect(input(doc, `site-${site}`).closest("label")?.textContent?.trim()).not.toBe("");
   }
   expect(input(doc, "hide-suggested").type).toBe("checkbox");
-  // Ads are always hidden: there is no control for them.
   expect(doc.querySelectorAll('[id^="action-"]').length).toBe(0);
 });
 
@@ -300,12 +297,10 @@ test("over-cap signatures are marked on their own row and only while still cache
   );
   const x = $<HTMLElement>(doc, "diag-x");
   const rows = rowsOf(doc, "x");
-  // Only the signature that is both over cap and still cached counts.
   expect(x.dataset.overCap).toBe("1");
   expect(rows.map((r) => (r as HTMLElement).dataset.overCap)).toEqual(["true", undefined]);
   expect(cells(rows[0])[0]).toContain("shared");
   expect(x.textContent).toContain("그룹 상한");
-  // A site with no over-cap note renders exactly as before.
   expect($<HTMLElement>(doc, "diag-youtube").dataset.overCap).toBe("0");
   expect($<HTMLElement>(doc, "diag-youtube").textContent).not.toContain("그룹 상한");
 });
@@ -405,10 +400,8 @@ test("renderOverrides lists the count and one row per opaque key with its decisi
   expect(cells(overrideRows(doc, "x")[0]).slice(0, 3)).toEqual(["k1", "광고 아님", today(new Date(AT))]);
   expect(cells(overrideRows(doc, "x")[1]).slice(0, 3)).toEqual(["k2", "광고 맞음", today(new Date(AT))]);
   expect(overrideRows(doc, "linkedin").length).toBe(1);
-  // A site with no answers has no block at all, so the list only names what exists.
   expect(doc.querySelector("#override-youtube")).toBeNull();
   expect(doc.querySelector("#override-instagram")).toBeNull();
-  // Every row can be cleared on its own, by site and opaque key.
   const button = overrideRows(doc, "x")[0]?.querySelector<HTMLButtonElement>("button[data-key]");
   expect(button?.dataset.site).toBe("x");
   expect(button?.dataset.key).toBe("k1");

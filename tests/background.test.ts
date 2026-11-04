@@ -593,31 +593,24 @@ test("resetCaches removes every sig:* key and the injected day's budget key only
 });
 
 test("resetCaches also removes every overcap:* key, whatever day it carries", async () => {
-  // Given: a cached verdict, today's over-cap note for it and a stale one from another day.
   store[sigKey("x")] = { a: 1 };
   store[overCapKey("x")] = { day: today(NOW), keys: ["1fd217c7"] };
   store[overCapKey("youtube")] = { day: "2000-01-01", keys: ["stale"] };
   store[budgetKey(today(NOW))] = { count: 3 };
   store.settings = { provider: "openai" };
-  // When
   await bg.resetCaches(NOW);
-  // Then: the note cannot outlive the cache entry it names, so it cannot come back
-  // when the same skeleton is cached again later the same day.
   expect(Object.keys(store).sort()).toEqual(["settings"]);
 });
 
 test("resetCaches and a provider change both keep the user's answers", async () => {
-  // Given: a cached verdict and a user answer for the same signature.
   store[sigKey("x")] = { a: 1 };
   store["override:x"] = { entries: { "1fd217c7": { decision: "keep", at: 5 } } };
   store.settings = { provider: "openai", openai: { model: "gpt-6-luna" } };
-  // When: today's cache is cleared and then the model changes.
   await bg.resetCaches(NOW);
   await bg.handleStorageChange(
     { settings: { oldValue: { provider: "openai", openai: { model: "a" } }, newValue: { provider: "openai", openai: { model: "b" } } } },
     "local"
   );
-  // Then: an answer is the user's own verdict, so it never expires with the daily cache.
   expect(store["override:x"]).toStrictEqual({ entries: { "1fd217c7": { decision: "keep", at: 5 } } });
   expect(store[sigKey("x")]).toBeUndefined();
 });

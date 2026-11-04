@@ -6,7 +6,6 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 
-/** The manifest only exists after a build, so every check below runs on a real `wxt build` in a scratch copy. */
 async function buildManifest(): Promise<string> {
   const out = mkdtempSync(join(tmpdir(), "jev-build-layout-"));
   for (const entry of ["src", "entrypoints"]) await cp(join(ROOT, entry), join(out, entry), { recursive: true });
@@ -61,11 +60,11 @@ export function manifestIssues(m: Manifest): string[] {
     if (cs.run_at !== "document_start") issues.push(`content_scripts[${i}] run_at is ${String(cs.run_at)}`);
   });
 
-  const declared = [...(m.permissions ?? []), ...(m.optional_permissions ?? [])];
+  const declared = new Set([...(m.permissions ?? []), ...(m.optional_permissions ?? [])]);
   for (const forbidden of ["declarativeNetRequest", "declarativeNetRequestWithHostAccess", "declarativeNetRequestFeedback", "webRequest", "webRequestBlocking", "scripting", "tabs"]) {
-    if (declared.includes(forbidden)) issues.push(`forbidden permission ${forbidden}`);
+    if (declared.has(forbidden)) issues.push(`forbidden permission ${forbidden}`);
   }
-  if (!declared.includes("storage")) issues.push("storage permission missing");
+  if (!declared.has("storage")) issues.push("storage permission missing");
   for (const key of ["declarative_net_request", "web_accessible_resources"]) {
     if (key in m) issues.push(`forbidden manifest key ${key}`);
   }

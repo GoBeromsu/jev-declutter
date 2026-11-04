@@ -131,7 +131,7 @@ describe("typesafe provider authentication: the key arrives per call", () => {
   test("concurrent calls never mix their keys", async () => {
     const seen: Record<string, string | undefined> = {};
     const fetchImpl = (async (url: string, init?: RequestInit) => {
-      const authorizationHeader = (init?.headers as Record<string, string>).Authorization;
+      const authorizationHeader = ((init as RequestInit).headers as Record<string, string>).Authorization;
       const body = JSON.parse(String(init?.body)) as { state: { items: ItemDescriptor[] } };
       seen[body.state.items[0]!.key] = authorizationHeader;
       return Response.json(answers({}));

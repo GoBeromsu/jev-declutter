@@ -1,18 +1,5 @@
 import type { SiteId } from "./types";
 
-// Per-site knowledge. Selectors are 2026 evidence from uBlock uAssets/EasyList and maintained
-// extensions (irbis-sh/filter-lists no-doomscroll, news-feed-eradicator, linkedin-feed-cleaner).
-// The sites change markup without notice: verify with the fixtures in tests/fixtures.
-// LinkedIn additionally ships a React/SDUI feed (role="listitem" cards, hashed class names, no
-// .update-components-* slots) to some accounts; its selectors sit alongside the legacy ones and
-// are structure-only evidence from the 2026-10-29 live probe recorded in
-// .omo/evidence/task-18-aside-feed-declutter.txt (fixtures: tests/fixtures/linkedin-react-*.html).
-// The LinkedIn right-rail ad selectors come from a second 2026-10-29 structure probe recorded in
-// .omo/evidence/task-25-aside-feed-declutter.txt.
-// Instagram likewise ships a feed with no `<header>` element at all; those selectors sit alongside
-// the legacy ones and are structure-only evidence from the 2026-10-30 live probe recorded in
-// .omo/evidence/task-28-aside-feed-declutter.txt (fixtures: tests/fixtures/instagram-live-*.html).
-
 export interface SiteModule {
   selector: string;
   description: string;
@@ -21,21 +8,15 @@ export interface SiteModule {
 export interface SiteConfig {
   id: SiteId;
   hosts: string[];
-  /** One feed item (a post, a video card). */
   item: string;
-  /** Structural ad markers, matched on the item or inside it. */
   adSelectors: string[];
-  /** UI-chrome label slots; the only places label words are read from. */
   labelSlots: string;
-  /** Follow-button slot; empty string = none. */
   followSlot: string;
   followMeansSuggested: boolean;
-  /** Recommendation modules removed as a whole. */
   modules: SiteModule[];
   excludedPaths: RegExp[];
   feedPaths: RegExp[];
   navEvent?: string;
-  /** Containers of user-authored content: no labelSlots/followSlot element inside them is ever read. */
   bodyExclude: string;
 }
 
@@ -91,53 +72,9 @@ export const SITES: Record<SiteId, SiteConfig> = {
     hosts: ["www.instagram.com"],
     item: "article",
     adSelectors: [],
-    // The first two selectors are the legacy `<header>` markup. Live Instagram renders NO
-    // `<header>` element at all, so both matched 0 elements and 1 ad-labelled plus 5
-    // suggested-labelled items per page view stayed untreated (.omo/evidence/live-recheck-2026-10-30.md
-    // finding I1). The third covers the current markup and comes from a read-only structure probe
-    // recorded in .omo/evidence/task-28-aside-feed-declutter.txt (fixtures:
-    // tests/fixtures/instagram-live-*.html).
-    // The account row has no attribute of its own: the only non-hashed handles in the whole
-    // article subtree are `dir`, `role`, `tabindex` and two `data-*` names. Every live marker text
-    // node sat inside `span[dir="auto"] > div ... > span`, and its own host span carries NO `dir`.
-    // Both qualifiers are load-bearing, not decoration:
-    //  - `span[dir="auto"]` as the ancestor: the bare `article div[data-interactable] span` form
-    //    read up to 34 chars of free header text live, where this form read at most 3.
-    //  - `:not([dir])`: the caption's text-bearing element IS a `span[dir="auto"]` nested in
-    //    another one, so without the qualifier a label slot reaches post text - which is both a
-    //    privacy leak and a false-positive path, since a one-word caption would match a marker
-    //    word exactly. bodyExclude's last entry covers the same shape, so dropping either one
-    //    alone still leaks nothing - the 2x2 matrix in tests/signals.test.ts pins that, and that
-    //    both read the same `dir` attribute, so the pair guards against a selector regression,
-    //    not against Instagram dropping `dir` from the caption.
-    // Not anchored on `div[data-interactable]` (the hydrated account-row container): 3 of 19
-    // marked items in one probe session carried no such attribute anywhere, and the scanner's
-    // MutationObserver watches childList only, so a late attribute is not re-read.
     labelSlots: 'article header span, article header a[role="link"] + div span, article span[dir="auto"] span:not([dir])',
-    // The last two bodyExclude entries both exist to keep the attribution line (a reel's audio
-    // credit and its kin) out of chrome_text. It is the one place where a slot-shaped span carried
-    // text that a profile link ALSO carries: 8 and 12 chars, up to 4 strings a session, one of
-    // them unique to its item, so it cannot be dismissed as a shared UI label. The two entries
-    // cover it by shape and by region, which is deliberate - the region-based one is inert in the
-    // markup variant that ships no `data-interactable` attribute at all.
-    //  - `span[dir="auto"] > span`: the attribution and timestamp line, i.e. a DIRECT span child of
-    //    the dir-span. 96 of 96 live marker slots sat under a `div` instead, so no marker lives
-    //    there; adding it changed 0 verdicts and 0 follow reads over 3 sessions, halved the chrome
-    //    strings sent, and - unlike narrowing labelSlots to `span[dir="auto"] div span` - left
-    //    `withheldSlots` untouched, so no item slid onto scan.ts's "no signals at all, keep without
-    //    asking" branch (that alternative moved 4 of 17 items onto it).
-    //  - `div[data-interactable] div[data-interactable]`: the same pill by region, for a shape
-    //    change inside it. Every live marker slot sat at nesting 0 or 1 (28 of 28) and every
-    //    Follow control at exactly 1 (13 of 13), so it cannot reach either.
     bodyExclude:
       'article h1, article ul li, article div[role="button"] span[dir="auto"], article span[dir="auto"] span[dir="auto"], article div[data-interactable] div[data-interactable], article span[dir="auto"] > span',
-    // The live Follow control is a `div[role="button"][tabindex]` inside the account row, so the
-    // legacy `article header button` never matched it. Instagram shows it only for an account the
-    // user does not follow, which is what `followMeansSuggested` means here: over four read-only
-    // sessions it appeared on 0 of 13 ORGANIC items (0 even counting every button in the article)
-    // and on 9 of 11 suggested ones, never on an ad. It is anchored on `div[data-interactable]`
-    // rather than on the article so it cannot reach a "Follow" control in the caption or comment
-    // region, and it stays a SECONDARY signal: every live follow item also carried a label.
     followSlot: 'article header button, article div[data-interactable] [role="button"], article div[data-interactable] button',
     followMeansSuggested: true,
     modules: [
@@ -152,61 +89,18 @@ export const SITES: Record<SiteId, SiteConfig> = {
     id: "linkedin",
     hosts: ["www.linkedin.com"],
     item: 'div.feed-shared-update-v2, div[data-testid="mainFeed"] div[role="listitem"]',
-    // React markup adds no ad selector: the live probe found 0 elements whose attribute name or
-    // value contains "sponsor"/"promot" anywhere in the feed, so React ads are label-only.
     adSelectors: [
       '[componentkey*="urn:li:sponsoredContentV2"]',
       "[data-sponsored-tracking-url]",
       '[data-is-sponsored="true"]',
       "article[data-is-sponsored]"
     ],
-    // The last two selectors cover LinkedIn's 2026 React feed (see the header note). `h2 + div
-    // p[componentkey]` is the actor sub-description inside the block following the post's hidden
-    // a11y heading; it holds "Promoted" / "프로모션". `h2 + p[componentkey]` is the update-level
-    // chrome paragraph (the position the legacy `.update-components-header__text-view` header
-    // occupied).
-    // Both qualifiers are load-bearing, not decoration:
-    //  - `[componentkey]`: the keyless sibling paragraph is the author headline (live max 197
-    //    chars of author bio, which must never reach a request), while all live markers sit in
-    //    keyed paragraphs of at most 43 chars.
-    //  - `+` and not `~`: the post commentary is a LATER keyed `p` sibling of the same heading, so
-    //    the general-sibling form would admit the body wrapper as a label slot (live 9 of 9 of its
-    //    extra matches wrapped the body span) and leave bodyExclude's expandable-text-box entry as
-    //    the only thing keeping post text out of chrome_text. Adjacent-sibling keeps every hide
-    //    verdict and opens one slot instead of nineteen. Pinned by the testid-removal test in
-    //    tests/signals.test.ts.
-    // The live keyed actor paragraph also WRAPS the member's `/in/` profile anchor: 12 of 30 and
-    // 10 of 31 live slots in two measured sessions, anchor text up to 37 chars, reaching
-    // chrome_text verbatim every time. A `:not(:has(a))` qualifier would discard the whole slot
-    // and lose any marker sharing it, so the name is dropped at the TEXT READ instead: `slotText`
-    // in src/signals.ts skips nested `a[href]` subtrees for every site.
     labelSlots:
       ".update-components-actor__sub-description, .update-components-actor__description, .update-components-header__text-view, .update-components-header, h2 + div p[componentkey], h2 + p[componentkey]",
     bodyExclude:
       ".update-components-text, .feed-shared-inline-show-more-text, .update-components-article, .feed-shared-update-v2__description, span[data-testid=\"expandable-text-box\"]",
-    // No React-markup follow slot: on the live React feed 4 of 26 ORGANIC items (reposts by a
-    // connection, company pages) carry a Follow button, so with followMeansSuggested a React
-    // follow slot would hide organic posts. React suggested items are detected by label only.
     followSlot: ".update-components-actor button, button.follow",
     followMeansSuggested: true,
-    // React markup adds no recommendation module: the todo 18 live probe found no recommendation
-    // rail at all (the only asides were an empty sidebar and the ad column).
-    // The last two selectors cover that ad column - LinkedIn's right-rail ad placement, F3
-    // finding L1. A 2026-10-29 read-only structure probe of the live rail found the placement
-    // rendered as a 300x250 cross-origin iframe carrying the SDUI slot key
-    // `componentkey="MainFeedDesktopNav_feed_ad"`, inside a wrapper div whose only attribute is a
-    // hashed-class list (`ajr*` build output), under a rail `aside` with no stable hook either.
-    // The slot key is the one non-hashed handle on the placement: over 12 live loads it was the
-    // single componentkey value containing "ad", `[componentkey$="_feed_ad"]` matched exactly one
-    // element per load, and it never appeared on a feed item, the profile card, the news rail
-    // widget or the games rail widget (`feedRightNavGamesComponentRef`). `$=` and not `*=`, so a
-    // future `feed_adjacent`-style slot name cannot match.
-    //  - the `:has(> iframe ...)` entry hides the CONTAINER rather than the frame alone, and the
-    //    direct-child combinator keeps it on the tight wrapper instead of the rail column.
-    //  - the `:not(iframe)` entry covers the DOM "Promoted" card variant F3 recorded in the same
-    //    slot. That variant did not reproduce in 12 live loads on 2026-10-29, so it is covered
-    //    structurally - same slot key, any tag - and never by a guessed label or class.
-    // The frame's contents are cross-origin and are never read: only the container is treated.
     modules: [
       { selector: 'aside[aria-label="LinkedIn News"]', description: "LinkedIn News panel" },
       { selector: "#feed-news-module", description: "LinkedIn News module in the feed sidebar" },
@@ -231,13 +125,11 @@ export function siteForHost(host: string): SiteId | null {
 export interface SelectorProblem {
   site: string;
   field: "item" | "adSelectors" | "labelSlots" | "followSlot" | "modules" | "bodyExclude";
-  /** Index inside list fields; 0 for single-selector fields. */
   index: number;
   selector: string;
   error: string;
 }
 
-/** Checks every selector of every site parses; requires a DOM (document). */
 export function validateSelectors(sites: Partial<Record<string, SiteConfig>> = SITES): SelectorProblem[] {
   const problems: SelectorProblem[] = [];
   const check = (site: string, field: SelectorProblem["field"], index: number, selector: string): void => {

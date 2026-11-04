@@ -1,0 +1,34 @@
+{
+  "jsPlugins": ["./lint/no-comments.js"],
+  "plugins": ["unicorn", "oxc", "promise", "typescript"],
+  "categories": { "correctness": "error", "perf": "error" },
+  "rules": { "no-comments/no-comments": "error" },
+  "ignorePatterns": [
+    "dist/**",
+    ".output/**",
+    ".wxt/**",
+    "node_modules/**",
+    ".omo/**",
+    ".omc/**",
+    "tests/fixtures/**"
+  ],
+  "overrides": [
+    {
+      "files": [
+        "tests/providers.openai.test.ts",
+        "tests/providers.typesafe.test.ts",
+        "tests/cache.test.ts",
+        "tests/background.test.ts",
+        "tests/scan.test.ts",
+        "tests/storage.test.ts",
+        "tests/manifest.test.ts",
+        "tests/options.test.ts"
+      ],
+      "rules": { "eslint/no-await-in-loop": "off" }
+    },
+    {
+      "files": ["scripts/probe/linkedin.ts"],
+      "rules": { "eslint/no-control-regex": "off" }
+    }
+  ]
+}

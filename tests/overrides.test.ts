@@ -59,9 +59,7 @@ afterEach(() => {
 });
 
 test("saveOverride stores only the signalKey, the decision and a timestamp, and sends nothing", async () => {
-  // When
   await saveOverride("x", "1fd217c7", "keep", 1_700_000_000_000);
-  // Then
   expect(store[overrideKey("x")]).toStrictEqual({ entries: { "1fd217c7": { decision: "keep", at: 1_700_000_000_000 } } });
   const record = store[overrideKey("x")] as Record<string, unknown>;
   expect(Object.keys(record)).toEqual(["entries"]);
@@ -92,13 +90,10 @@ test("concurrent answers never lose one another", async () => {
 });
 
 test("an override survives a simulated reload and never expires with the daily cache", async () => {
-  // Given: an answer saved today, next to a daily cache for the same key.
   await saveOverride("x", "k", "keep", 10);
   store[sigKey("x")] = { day: today(), providerKey: "openai:gpt-6-luna:1", entries: { k: { ad: 0.9, suggested: null } }, order: ["k"] };
-  // When: the day rolls over and the cache is dropped, as a new page load would find it.
   delete store[sigKey("x")];
   const reloaded = await loadOverrides("x");
-  // Then: the record carries no day or provider field to expire by.
   expect(lookupOverride(reloaded, "k")).toStrictEqual({ decision: "keep", at: 10 });
   expect(JSON.stringify(store[overrideKey("x")])).not.toContain("day");
   expect(JSON.stringify(store[overrideKey("x")])).not.toContain("providerKey");
@@ -142,12 +137,9 @@ test("clearOverride removes one answer and clearOverrides removes every site's a
 });
 
 test("a user keep clears that key's over-cap charge and leaves the other keys named", async () => {
-  // Given: two signatures that hit the model group cap today.
   await recordOverCap("x", ["poisoned", "other"]);
   expect((await loadOverCap("x")).sort()).toEqual(["other", "poisoned"]);
-  // When: the user answers "not an ad" for one of them.
   await clearOverCap("x", "poisoned");
-  // Then
   expect(await loadOverCap("x")).toEqual(["other"]);
   await clearOverCap("x", "other");
   expect(await loadOverCap("x")).toEqual([]);

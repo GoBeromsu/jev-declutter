@@ -2,7 +2,6 @@ export type SiteId = "youtube" | "x" | "instagram" | "linkedin";
 
 export type Action = "keep" | "blur" | "hide";
 
-/** Who put the item in the feed: an advertiser, or the platform's recommender. What I follow is neither. */
 export type Category = "ad" | "suggested";
 
 export type ProviderId = "openai" | "typesafe";
@@ -13,11 +12,9 @@ export interface Settings {
   typesafe: { apiKey: string; model: string };
   sites: Record<SiteId, { enabled: boolean }>;
   hideAds: boolean;
-  /** Recommendations: single posts and modules alike. */
   hideSuggested: boolean;
 }
 
-/** Structure and UI-chrome labels only: no post text ever enters this shape. */
 export interface ItemDescriptor {
   n: number;
   key: string;
@@ -30,7 +27,6 @@ export interface ItemDescriptor {
   path_kind: string;
 }
 
-/** null = refused or missing answer: keep that item. */
 export interface ItemScores {
   ad: number | null;
   suggested: number | null;

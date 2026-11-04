@@ -82,7 +82,6 @@ test("role, aria-label presence, external link, video and img are tokens", () =>
   expect(signature(el(`<div><a href="https://example.com/x">hi</a></div>`), "x")).not.toBe(
     signature(el(`<div><a href="/inbox">hi</a></div>`), "x")
   );
-  // The registered test DOM is not navigated, so location.host is "" and every absolute http link is external.
   expect(signature(el(`<div><a href="https://x.com/u/a"></a></div>`), "x")).toBe(
     signature(el(`<div><a href="https://example.com/x"></a></div>`), "x")
   );

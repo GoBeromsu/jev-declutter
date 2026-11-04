@@ -25,7 +25,6 @@ const FILES: { file: string; site: SiteId }[] = [
   { file: "linkedin-react-ko.html", site: "linkedin" }
 ];
 
-/** ko/en twins that must produce the same verdict sequence, by fixture prefix. */
 const PAIRS: { site: SiteId; prefix: string }[] = [
   { site: "youtube", prefix: "youtube" },
   { site: "x", prefix: "x" },
@@ -35,12 +34,6 @@ const PAIRS: { site: SiteId; prefix: string }[] = [
   { site: "linkedin", prefix: "linkedin-react" }
 ];
 
-/**
- * Per-FILE, not per-site: LinkedIn's React markup carries no structural ad attribute and no
- * legacy actor follow slot, so its only follow-slot hit is the body-nested negative control.
- * Instagram's live markup has no `<header>`, so its 21 hits are the account-row control of each
- * of the 19 items plus the two Follow controls (the suggested one and the in-body negative).
- */
 const PINNED: Record<string, { ads: number; follows: number }> = {
   "youtube-en.html": { ads: 2, follows: 0 },
   "youtube-ko.html": { ads: 2, follows: 0 },
@@ -56,17 +49,12 @@ const PINNED: Record<string, { ads: number; follows: number }> = {
   "linkedin-react-ko.html": { ads: 0, follows: 1 }
 };
 
-/** The 12 matrix files plus the two X-only fixtures: the verdict and link-text guards cover all 14. */
 const ALL_FIXTURES: { file: string; site: SiteId }[] = [
   ...FILES,
   { file: "x-messages-en.html", site: "x" },
   { file: "stress-x-en.html", site: "x" }
 ];
 
-/**
- * Deterministic verdicts of record, measured before the slot-link guard landed. Any change to slot
- * reading that gained or lost a hide verdict on ANY fixture moves one of these numbers.
- */
 const VERDICT_COUNTS: Record<string, { items: number; ad: number; suggested: number; none: number }> = {
   "youtube-en.html": { items: 19, ad: 4, suggested: 2, none: 13 },
   "youtube-ko.html": { items: 19, ad: 4, suggested: 2, none: 13 },
@@ -273,15 +261,6 @@ describe("follow slot honours bodyExclude", () => {
 });
 
 describe("body-leak canary control", () => {
-  /**
-   * X's sentinel-bearing eligible slot sits inside the quoted tweet, which is BOTH a bodyExclude
-   * container and a `[role="link"]` wrapper, so two independent guards now stop it and bypassing
-   * one alone no longer leaks (measured for todo 27: bodyExclude bypassed alone leaves x-en at 0
-   * leaking items, x-ko at 1). The control therefore bypasses both - `bodyExclude` through the
-   * config and the link-wrapper rule by stripping `role="link"` from the markup, the same
-   * attribute-removal trick the testid-rename test below uses - and then both files leak. Keeping
-   * only the config bypass would have let this canary pass vacuously on x-en.
-   */
   const control = (site: SiteId, files: string[]): void => {
     const cfg = SITES[site];
     const broken: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
@@ -297,7 +276,6 @@ describe("body-leak canary control", () => {
       expect(items.length).toBeGreaterThan(0);
       const clean = items.filter((el) => extractSignals(el, cfg).chromeText.some((s) => s.includes(SENTINEL)));
       expect(clean.length).toBe(0);
-      // The shipped config holds the line even with one guard's hook removed from the markup.
       const strippedClean = unguardedItems.filter((el) => extractSignals(el, cfg).chromeText.some((s) => s.includes(SENTINEL)));
       expect(strippedClean.length).toBe(0);
     }
@@ -308,8 +286,6 @@ describe("body-leak canary control", () => {
   });
 
   test("bodyExclude still guards the X follow read on its own (quoted-tweet Follow)", () => {
-    // Independent of the link-wrapper rule, which touches only label-slot STRINGS: bypassing
-    // bodyExclude alone must still turn the quoted-tweet Follow button into a false suggested mark.
     const cfg = SITES.x;
     const broken: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
     for (const file of ["x-en.html", "x-ko.html"]) {
@@ -323,10 +299,6 @@ describe("body-leak canary control", () => {
   });
 
   test("with the bodyExclude filter bypassed, the LinkedIn React follow-in-body negative is marked", () => {
-    // The React label slots cannot reach the commentary paragraph, so bodyExclude no longer
-    // guards chromeText there - it guards the FOLLOW slot: the negative item's `button.follow`
-    // sits inside the body span, and only bodyExclude keeps it from turning an organic post into
-    // a suggested one. Bypassing the filter must therefore produce exactly that false mark.
     const cfg = SITES.linkedin;
     const broken: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
     for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
@@ -340,11 +312,6 @@ describe("body-leak canary control", () => {
   });
 
   test("post text stays out of descriptors even when the body testid is renamed", () => {
-    // Defence in depth. bodyExclude's expandable-text-box entry must not be the ONLY guard: the
-    // React label slots must never reach the commentary paragraph in the first place. Strip the
-    // body testid - a rename LinkedIn can ship any day - and no descriptor field may carry body
-    // text. This fails with a general-sibling (`h2 ~ p[componentkey]`) slot, which admits the
-    // paragraph wrapping the body span, and passes with the adjacent-sibling (`h2 + ...`) form.
     const cfg = SITES.linkedin;
     for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
       const html = readFileSync(join(DIR, file), "utf8").replaceAll(' data-testid="expandable-text-box"', "");
@@ -363,9 +330,6 @@ describe("body-leak canary control", () => {
   });
 
   test("dropping [componentkey] from the React actor slot leaks the author headline", () => {
-    // The keyless sibling paragraph of the React actor sub-description is the author headline
-    // (author bio, up to 197 chars live). bodyExclude cannot reach it, so the slot qualifier is
-    // the only thing keeping it out of a request: widening the slot must leak the sentinel.
     const widened: SiteConfig = { ...SITES.linkedin, labelSlots: `${SITES.linkedin.labelSlots}, h2 + div p` };
     for (const file of ["linkedin-react-en.html", "linkedin-react-ko.html"]) {
       const items = [...load(file).querySelectorAll(SITES.linkedin.item)];
@@ -375,23 +339,8 @@ describe("body-leak canary control", () => {
   });
 });
 
-/**
- * Instagram's live feed renders no `<header>` element at all, so both legacy label slots matched 0
- * elements and every ad- or suggested-labelled item was kept
- * (.omo/evidence/live-recheck-2026-10-30.md finding I1). On the live markup the label line is a
- * dir-less `<span>` under `span[dir="auto"] > div` inside the account row, the account NAME is the
- * same shape wrapped in the profile link, and the caption's own text element is a
- * `span[dir="auto"]` nested inside another one. Two guards keep post text out of a request: the
- * `:not([dir])` qualifier on the slot and the matching bodyExclude entry. Both key off the same
- * `dir` attribute, so they are defence in depth against a SELECTOR regression (one of them being
- * dropped), which is what the matrix below pins.
- * The attribution pill is the second source, and the one bodyExclude alone covers: its span IS
- * slot-shaped, and its label is part of the profile link beside it, which is why a doubly-nested
- * `div[data-interactable]` region is never read.
- */
 describe("Instagram live markup (no <header>)", () => {
   const cfg = SITES.instagram;
-  /** labelSlots without the `:not([dir])` qualifier: the caption's text element becomes a slot. */
   const widened: SiteConfig = { ...cfg, labelSlots: `${cfg.labelSlots}, article span[dir="auto"] span` };
   const bypassed: SiteConfig = { ...cfg, bodyExclude: ":not(*)" };
 
@@ -412,7 +361,6 @@ describe("Instagram live markup (no <header>)", () => {
       items.forEach((el, i) => {
         const sig = extractSignals(el, cfg);
         const chrome = sig.chromeText.join("|");
-        // The account name sits in the slot-shaped span inside the profile link.
         const name = (el.querySelector('span[dir="auto"] a[role="link"] span')?.textContent ?? "").trim();
         if (name.length < 5) problems.push(`${file}[${i}] has no account-name slot`);
         if (chrome.includes(name)) problems.push(`${file}[${i}] chromeText carries the account name`);
@@ -439,16 +387,12 @@ describe("Instagram live markup (no <header>)", () => {
       for (const el of organic) {
         const sig = extractSignals(el, cfg);
         expect(el.querySelectorAll(cfg.labelSlots).length).toBeGreaterThan(1);
-        // Nothing is read, yet the item is still distinguishable from a contentless one, so
-        // src/scan.ts keeps asking the model about it (todo 27 finding F1).
         expect(sig.chromeText).toEqual([]);
         expect(sig.withheldSlots).toBeGreaterThan(0);
       }
-      // The line itself is slot-shaped: bodyExclude, not the slot selector, is what drops it.
       const line = organic[0]!.querySelector('span[dir="auto"] > span')!;
       expect(line.matches(cfg.labelSlots)).toBe(true);
       expect(line.closest(cfg.bodyExclude)).not.toBeNull();
-      // A marker sits one <div> deeper, where bodyExclude cannot reach it.
       const markerSlot = doc.querySelector('[data-qa-kind="adLabel"] span[dir="auto"] > div > span')!;
       expect(markerSlot.matches(cfg.labelSlots)).toBe(true);
       expect(markerSlot.closest(cfg.bodyExclude)).toBeNull();
@@ -462,27 +406,20 @@ describe("Instagram live markup (no <header>)", () => {
       const cut = (el: Element): string => (el.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 40);
       expect(caption.textContent).toContain(SENTINEL);
       expect(pill.textContent).toContain(SENTINEL);
-      // The caption becomes a slot the moment the `:not([dir])` qualifier goes; the pill's span is
-      // ALREADY slot-shaped and bodyExclude's nested-region entry is the only thing holding it.
       expect([...doc.querySelectorAll(widened.labelSlots)]).toContain(caption);
       expect([...doc.querySelectorAll(cfg.labelSlots)]).not.toContain(caption);
       expect([...doc.querySelectorAll(cfg.labelSlots)]).toContain(pill);
       expect(caption.matches(cfg.bodyExclude)).toBe(true);
       expect(pill.closest(cfg.bodyExclude)).not.toBeNull();
-      // The pill's label is part of the profile link beside it - the live shape that made this
-      // region a leak in the first place.
       expect(pill.closest("div[data-interactable]")!.querySelector('a[role="link"]')!.textContent).toContain(cut(pill));
       const sentinelStrings = (config: SiteConfig): string[] =>
         [...load(file).querySelectorAll(config.item)]
           .flatMap((el) => extractSignals(el, config).chromeText)
           .filter((s) => s.includes(SENTINEL));
       expect(sentinelStrings(cfg)).toEqual([]);
-      // Failing control 1: bodyExclude bypassed - the attribution pill lands in chrome_text, which
-      // is what gets sent on a cache miss. The caption still does not: the qualifier holds alone.
       const withoutBodyExclude = sentinelStrings(bypassed);
       expect(withoutBodyExclude).toContain(cut(pill));
       expect(withoutBodyExclude).not.toContain(cut(caption));
-      // Failing control 2: the slot qualifier dropped - bodyExclude still keeps the caption out.
       expect(sentinelStrings(widened)).toEqual([]);
       expect(sentinelStrings({ ...widened, bodyExclude: ":not(*)" })).toContain(cut(caption));
     });
@@ -499,7 +436,6 @@ describe("Instagram live markup (no <header>)", () => {
     test(`${file}: an in-body Follow control is a signal only once bodyExclude is bypassed`, () => {
       const el = load(file).querySelector('[data-qa-kind="bodyFollow"]')!;
       expect(el.getAttribute("data-qa-expect")).toBe("keep");
-      // Non-vacuous: the follow slot does reach it, and only bodyExclude stops the read.
       const inBody = el.querySelector('ul li [role="button"]')!;
       expect(inBody.matches(cfg.followSlot)).toBe(true);
       expect(extractSignals(el, bypassed).followButton).toBe(true);
@@ -510,20 +446,12 @@ describe("Instagram live markup (no <header>)", () => {
   }
 });
 
-/**
- * Slot text must carry the site's own UI labels and nothing else. Link text inside a chrome slot
- * names an entity - on LinkedIn's React feed the actor slot wraps a `/in/` profile anchor whose
- * text is a member name (12 of 30 and 10 of 31 live slots in two sessions, verbatim in
- * chrome_text every time, up to 37 chars) - and README promises names are never sent. The guard
- * is generic in slotText, so it must cost no marker on any site.
- */
 describe("link text inside a label slot never reaches chromeText", () => {
   const make = (html: string): Element => {
     const host = document.createElement("div");
     host.innerHTML = html;
     return host.firstElementChild!;
   };
-  /** The live React shape: a keyed actor paragraph, inside the div adjacent to the a11y heading, wrapping the anchor. */
   const reactItem = (slotInner: string): Element =>
     make(
       '<div role="listitem"><div><h2><span>Feed post</span></h2>' +
@@ -636,7 +564,6 @@ describe("link text inside a label slot never reaches chromeText", () => {
       });
     }
     expect(leaks).toEqual([]);
-    // Non-vacuous: the React fixtures contribute link-bearing slots (2 per file).
     expect(linkSlots).toBeGreaterThanOrEqual(4);
   });
 
@@ -658,16 +585,6 @@ describe("link text inside a label slot never reaches chromeText", () => {
   });
 });
 
-/**
- * The companion case: the slot itself sits INSIDE a link. The nested-anchor rule above only
- * skips anchors found BELOW a slot, so a slot that is a link's descendant was read in full. Live
- * X is exactly that shape: 3 of 3 eligible label slots over three read-only sessions sat inside a
- * profile-shaped link (single path segment, no `<time>`, no digit, the link carrying no text
- * beyond the slot), read up to 27 chars of what can only be a handle or display name
- * (.omo/evidence/aside-feed-declutter-todo-26-gate-review.md finding F3, re-measured for todo 27).
- * The rule: a wrapper-bound slot contributes ONLY an exact marker word, never its free text - so
- * the strings it can still emit are the fixed constants of src/markers.ts, never an identifier.
- */
 describe("a label slot inside a link contributes only its marker word", () => {
   const cfg = SITES.x;
   const make = (html: string): Element => {
@@ -675,13 +592,11 @@ describe("a label slot inside a link contributes only its marker word", () => {
     host.innerHTML = html;
     return host.firstElementChild!;
   };
-  /** An X cell whose single label slot sits inside `wrap`; `wrap` empty = the no-wrapper control. */
   const xItem = (wrap: string, text: string): Element => {
     const slot = `<div data-testid="socialContext">${text}</div>`;
     const inner = wrap === "" ? slot : `<${wrap}>${slot}</${wrap.split(" ")[0]}>`;
     return make(`<div data-testid="cellInnerDiv">${inner}</div>`);
   };
-  /** Synthetic stand-in for the live 27-char read; never a real name. */
   const NAME = "Member One Display Name 123";
 
   test("control: the same slot outside any link IS read (the rule has something to remove)", () => {
@@ -755,21 +670,11 @@ describe("a label slot inside a link contributes only its marker word", () => {
     expect(deterministic(sig, cfg)).toEqual({ category: "suggested", p: 1 });
   });
 
-  /**
-   * `withheldSlots` is why an emptied slot is not the same thing as a missing one. `src/scan.ts`
-   * keeps an item with no chrome at all local instead of spending budget on it; without this
-   * counter that branch would read a slot this rule silenced as "this card has no chrome" and stop
-   * asking the model about it (todo 27 gate finding F1, measured on Instagram: 13 of 19 items per
-   * fixture). It is internal to the scanner: `toDescriptor` lists the wire fields explicitly, so it
-   * is never sent.
-   */
   test("withheldSlots counts exactly the slots whose text was withheld", () => {
     expect(extractSignals(xItem("", NAME), cfg).withheldSlots).toBe(0);
     expect(extractSignals(xItem('a href="#/member1"', NAME), cfg).withheldSlots).toBe(1);
     expect(extractSignals(xItem('div role="link"', NAME), cfg).withheldSlots).toBe(1);
-    // A marker is kept, so nothing was withheld.
     expect(extractSignals(xItem('a href="#/member1"', "Promoted"), cfg).withheldSlots).toBe(0);
-    // An empty slot is dropped before the rule can see it: nothing was withheld there either.
     expect(extractSignals(xItem('a href="#/member1"', "   "), cfg).withheldSlots).toBe(0);
     const two = make(
       '<div data-testid="cellInnerDiv">' +
@@ -810,9 +715,6 @@ describe("a label slot inside a link contributes only its marker word", () => {
 
   for (const file of ["instagram-en.html", "instagram-ko.html"]) {
     test(`${file}: an item the rule silenced is distinguishable from an item with no chrome`, () => {
-      // The two inputs src/scan.ts needs to tell apart. Every undecided Instagram item has an
-      // empty chrome_text AND a withheld slot, so it must still be asked about; an item with
-      // neither is genuinely contentless and stays local.
       const siteCfg = SITES.instagram;
       const undecided = [...load(file).querySelectorAll(siteCfg.item)]
         .map((el) => extractSignals(el, siteCfg))
@@ -858,10 +760,6 @@ describe("a label slot inside a link contributes only its marker word", () => {
       });
     }
     expect(leaks).toEqual([]);
-    // Non-vacuous: Instagram's account-name slots sit inside the account's profile link - 19 per
-    // fixture, 76 over the fourteen files (legacy header markup and live markup alike), measured
-    // for todo 27 and re-measured for todo 28. None of them holds a marker, so the marker branch
-    // above is a guard for future markup, not the thing proving the zero.
     expect(wrapped).toBeGreaterThanOrEqual(76);
     expect(markerWrapped).toBe(0);
   });

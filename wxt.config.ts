@@ -2,8 +2,6 @@ import { defineConfig } from "wxt";
 
 export default defineConfig({
   imports: false,
-  // `wxt dev` opens its own Chrome with the dev build loaded. The profile persists (API key, logins).
-  // CDP on 9222 so agents can inspect the live dev Chrome (web-ext 10 ignores `chromiumPort`).
   webExt: {
     chromiumProfile: ".wxt/chrome-profile",
     keepProfileChanges: true,

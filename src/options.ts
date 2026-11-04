@@ -21,9 +21,7 @@ export interface DiagnosticsView {
   currentKey: string;
   caches: Partial<Record<SiteId, unknown>>;
   budgetUsed: number;
-  /** signalKeys whose model verdict hit its page-view cap today (src/scan.ts), per site. */
   overCap?: Partial<Record<SiteId, readonly string[]>>;
-  /** The user's own answers from the overlay prompt (src/overrides.ts), per site. */
   overrides?: Partial<Record<SiteId, OverrideMap>>;
 }
 
@@ -43,7 +41,6 @@ function $<T extends Element>(root: ParentNode, id: string): T {
 const input = (root: ParentNode, id: string) => $<HTMLInputElement>(root, id);
 const modelSelect = (root: ParentNode) => $<HTMLSelectElement>(root, "model");
 
-/** One dropdown picks provider and model together: each option's value is `provider:model`. */
 function parseModel(value: string): { provider: ProviderId; model: string } {
   const at = value.indexOf(":");
   const provider = oneOf(at < 0 ? "" : value.slice(0, at), PROVIDERS, DEFAULT_SETTINGS.provider);
@@ -51,7 +48,6 @@ function parseModel(value: string): { provider: ProviderId; model: string } {
   return { provider, model: model || DEFAULT_MODEL[provider] };
 }
 
-/** A saved model the dropdown does not list yet (set before the dropdown existed) is kept as its own option. */
 function ensureOption(select: HTMLSelectElement, provider: ProviderId, model: string): void {
   const value = `${provider}:${model}`;
   if (Array.from(select.options).some((o) => o.value === value)) return;
@@ -66,7 +62,6 @@ export function collectForm(root: ParentNode = document): Settings {
   for (const site of SITE_IDS) sites[site] = { enabled: input(root, `site-${site}`).checked };
   const select = modelSelect(root);
   const chosen = parseModel(select.value);
-  // The provider not chosen keeps the model it was saved with (populateForm notes it on the select).
   const modelOf = (p: ProviderId) => (p === chosen.provider ? chosen.model : select.dataset[p] || DEFAULT_MODEL[p]);
   return {
     provider: chosen.provider,
@@ -148,7 +143,6 @@ function siteBlock(doc: Document, site: SiteId, view: DiagnosticsView): HTMLElem
   const day = cache && typeof cache.day === "string" ? cache.day : "";
   const key = cache && typeof cache.providerKey === "string" ? cache.providerKey : "";
   const stale = cache !== undefined && (day !== view.day || key !== view.currentKey);
-  // A reset clears the verdicts but not the over-cap note, so only keys still cached are shown.
   const overCap = new Set((view.overCap?.[site] ?? []).filter((k) => Object.hasOwn(entries, k)));
 
   const block = el(doc, "section", "diag");
@@ -228,7 +222,6 @@ function overrideBlock(doc: Document, site: SiteId, map: OverrideMap): HTMLEleme
   return block;
 }
 
-/** The list is opaque by construction: a signalKey is a hash of structure and chrome labels. */
 export function renderOverrides(
   overrides: Partial<Record<SiteId, OverrideMap>>,
   root: ParentNode = document
@@ -338,7 +331,6 @@ export async function main(root: ParentNode = document): Promise<void> {
     })();
   });
 
-  // One answer at a time, by site and opaque key: the row carries both, so nothing is guessed.
   $<HTMLElement>(root, "overrides").addEventListener("click", (event) => {
     const target = event.target instanceof Element ? event.target.closest<HTMLElement>("button[data-key]") : null;
     const site = target?.dataset.site;

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { SITES, type SiteConfig } from "../src/sites";
+import { extractSignals, toDescriptor } from "../src/signals";
 
 const DIR = join(import.meta.dir, "fixtures");
 const SENTINEL = "BODY_SENTINEL";
@@ -87,6 +89,31 @@ const load = (file: string): { html: string; doc: Document } => {
   const html = readFileSync(join(DIR, file), "utf8");
   return { html, doc: new DOMParser().parseFromString(html, "text/html") };
 };
+
+function collisionPreflight(doc: Document, cfg: SiteConfig): string[][] {
+  const groups = new Map<string, Element[]>();
+  for (const el of doc.querySelectorAll(cfg.item)) {
+    const key = toDescriptor(0, el, cfg, extractSignals(el, cfg)).key;
+    const members = groups.get(key) ?? [];
+    members.push(el);
+    groups.set(key, members);
+  }
+  return [...groups.values()]
+    .filter((members) => members.some((el) => el.getAttribute("data-qa-expect") === "keep") &&
+      members.some((el) => el.hasAttribute("data-qa-model")))
+    .map((members) => members.map((el) => el.getAttribute("data-qa-id") ?? "").sort());
+}
+
+test("fixture collision preflight detects the exact ambiguous real signalKey group", () => {
+  const { doc } = load("youtube-en.html");
+  expect(collisionPreflight(doc, SITES.youtube)).toEqual([]);
+  const note = doc.querySelector('[data-qa-model] > span[role="note"]');
+  if (!note) throw new Error("missing fixture model discriminator");
+  note.remove();
+  expect(collisionPreflight(doc, SITES.youtube)).toEqual([
+    ["init-0", "init-10", "init-14", "init-4", "init-6", "init-8"]
+  ]);
+});
 
 const norm = (s: string | null) => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 const matchesWord = (text: string | null, words: string[]) => words.some((w) => norm(w) === norm(text));

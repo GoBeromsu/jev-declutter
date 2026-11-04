@@ -19,7 +19,6 @@ interface Observer {
   disconnect(): void;
 }
 
-/** Browser scheduling and storage boundaries; tests drive delivery, never elapsed sleeps. */
 export interface ScanHost {
   settings(): Promise<Settings>;
   cache(): Promise<SignatureCache | undefined>;
@@ -34,17 +33,13 @@ export interface ScanHost {
   postTask(callback: () => void): void;
   timer(callback: () => Promise<void>): number;
   cancelTimer(id: number): void;
-  /** Diagnostics only: signalKeys whose model group hit its cap in this page view. */
   overCap(keys: readonly string[]): void;
-  /** The user's stored answers for this site; they never expire with the daily cache. */
   overrides(): Promise<OverrideMap | undefined>;
-  /** Persists one answer. Fire-and-forget: the page never waits for storage. */
   override(key: string, decision: OverrideDecision): void;
   overlay: OverlayHost;
 }
 
 function browserHost(cfg: SiteConfig): ScanHost {
-  // The prompt is built before the scanner exists; startScanner registers the real sink.
   const overlay = createOverlay(() => undefined);
   return {
     settings: loadSettings, cache: () => loadSigCache(cfg.id),
@@ -71,11 +66,8 @@ function browserHost(cfg: SiteConfig): ScanHost {
     },
     timer: (callback) => window.setTimeout(() => { void callback(); }, 120),
     cancelTimer: (id) => window.clearTimeout(id),
-    // A diagnostics hint must never break the scan: storage failure is simply no hint.
     overCap: (keys) => { void recordOverCap(cfg.id, keys).catch(() => undefined); },
     overrides: () => loadOverrides(cfg.id),
-    // Nothing leaves the browser here: the key is the opaque signalKey, and a "not an ad" answer
-    // also answers the over-cap note that named it.
     override: (key, decision) => {
       void saveOverride(cfg.id, key, decision)
         .then(() => (decision === "keep" ? clearOverCap(cfg.id, key) : undefined))
@@ -115,11 +107,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   const queue = new Map<string, ItemDescriptor>();
   const inflight = new Set<string>();
   const answers = new Map<string, { ad: number | null; suggested: number | null }>();
-  // Per page view: which DISTINCT elements each model verdict currently holds treated, which keys
-  // ran out of budget, and how many distinct feed items this page view has shown the scanner.
   const charges = new Map<string, Set<Element>>();
-  // The key each element was charged under: a held-then-recycled cell shows another key by the
-  // time it is dropped, and the slot to free is the one that paid for what is on screen.
   let chargedUnder = new WeakMap<Element, string>();
   const overCapped = new Set<string>();
   let reportedOverCap = 0;
@@ -128,7 +116,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   const priority = new Set<Element>();
   const modules = cfg.modules.map((m) => m.selector).join(",");
   const selector = [cfg.item, modules].filter(Boolean).join(",");
-  const qa = { callbackDurations: [] as number[], processed: 0, observedItems: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
+  const qa = { processed: 0, observedItems: 0, applyPaths: new WeakMap<Element, "ro" | "mutation">() };
   const excluded = () => cfg.excludedPaths.some((re) => re.test(location.pathname));
   const active = () => !stopped && !excluded() && settings.sites[cfg.id].enabled;
   const actions = () => actionsOf(settings);
@@ -137,7 +125,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
 
   const charged = (key: string, el: Element) => chargedUnder.get(el) === key;
 
-  /** One slot per element, so taking a new one always frees the old. */
   function charge(key: string, el: Element) {
     uncharge(el);
     const members = charges.get(key) ?? new Set<Element>();
@@ -146,7 +133,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     chargedUnder.set(el, key);
   }
 
-  /** Only a treatment that is genuinely gone frees its slot; a held item keeps it (D6). */
   function uncharge(el: Element) {
     const key = chargedUnder.get(el);
     if (key === undefined) return;
@@ -155,11 +141,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (members?.delete(el) && members.size === 0) charges.delete(key);
   }
 
-  /**
-   * A slot may only be held by a live treatment. A removal is not always announced - a fully cached
-   * page view sends no batch, so nothing sweeps - therefore detached members are pruned here, at
-   * the one decision point that spends the budget. A key under its budget costs one size read.
-   */
   function liveCharges(key: string, budget: number): number {
     const members = charges.get(key);
     if (!members) return 0;
@@ -206,13 +187,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     initial();
   }
 
-  /**
-   * An answer cleared on the options page must stop applying without a full page load, which is
-   * what the options page tells the user. The in-memory copy is replaced only if this page view is
-   * still the one that asked (generation) and no answer was given while the read was in flight
-   * (answerEpoch), so a slow read can never undo the user's newest answer. Items are re-judged
-   * only when the answers actually changed.
-   */
   function reloadOverrides() {
     const sentGeneration = generation;
     const epoch = answerEpoch;
@@ -233,31 +207,25 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   async function send() {
     timerId = undefined;
     if (!active() || host.now() < pauseUntil) return;
-    for (const [el, state] of states) {
+    for (const [el] of states) {
       if (!el.isConnected) {
         uncharge(el); states.delete(el); nearIO.unobserve(el); priority.delete(el);
-        // An item that left the page takes its prompt with it: a pill over whatever moved up into
-        // its place would answer for a skeleton the user never judged.
         host.overlay.hide(el);
       }
     }
     const liveKeys = new Set([...states.values()].map((state) => state.key));
     for (const key of queue.keys()) if (!liveKeys.has(key)) queue.delete(key);
     const nearKeys = new Set([...priority].map((el) => states.get(el)?.key));
-    // Share the background cap: excess items receive null scores there, silently under-filtering the feed.
     const batch = [...queue.values()].sort((a, b) => Number(nearKeys.has(b.key)) - Number(nearKeys.has(a.key))).slice(0, MAX_ITEMS);
     if (batch.length === 0) return;
     for (const d of batch) { queue.delete(d.key); inflight.add(d.key); }
     const sentGeneration = generation;
-    // Runtime transport is an external boundary: worker loss is an ordinary fail-open result.
     const result = await host.send({ type: "classify", site: cfg.id, items: batch })
       .catch((): ClassifyResult => ({ ok: false, error: "transport" }));
     if (stopped || generation !== sentGeneration) return;
     for (const d of batch) inflight.delete(d.key);
     if (!result.ok) {
       if (result.error === "http-429" || result.error === "budget") pauseUntil = host.now() + 60_000;
-      // One diagnostic per page load: the missing key is a page-wide condition,
-      // not a per-item or per-batch one. Never echo any stored key material.
       if (result.error === "no-key" && !warnedNoKey) {
         warnedNoKey = true;
         console.warn("[jev-declutter]", "no-key", "save a provider API key on the extension options page");
@@ -274,7 +242,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     schedule();
   }
 
-  /** A hidden element's own rect is zero: use a rendered predecessor, then its parent. */
   function revealTop(el: Element): number {
     let previous = el.previousElementSibling;
     while (previous) {
@@ -295,9 +262,7 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       model: boolean; rect: OverlayRect;
     }[] = [];
     const painted = pageHasPainted();
-    // One geometry read of the prompt layer per flush, taken only when a prompt may be needed.
     let origin: OverlayOrigin | undefined;
-    // Slots claimed earlier in THIS flush, so items of one key cannot all read the same count.
     const claimed = new Map<string, number>();
     for (const el of pending) {
       applyRO.unobserve(el);
@@ -319,7 +284,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         const signals = extractSignals(el, cfg);
         descriptor = toDescriptor(n++, el, cfg, signals);
         key = descriptor.key;
-        // The cap's denominator: distinct feed items this page view has shown us, modules excluded.
         if (!observedSeen.has(el)) { observedSeen.add(el); qa.observedItems = ++observedItems; }
         const local = deterministic(signals, cfg);
         if (local) want = actionFor(local.category, local.p, actions());
@@ -327,18 +291,10 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         else {
           const override = lookupOverride(overrides, key);
           const scores = override ? undefined : lookup(cache, key) ?? answers.get(key);
-          // Precedence is deterministic > user override > cache/model, and an override is also an
-          // answer FOR the key: the model is never asked about it again, so answering costs no
-          // request, takes no cap slot and offers no further prompt.
           if (override) want = override.decision === "keep" ? "keep" : "hide";
           else if (scores) {
             fromModel = true;
             want = scoreAction(scores);
-            // One model answer is a single judgement about a skeleton, not evidence about each
-            // item wearing it. While it already holds a quarter of this page view's items treated,
-            // the group size is itself evidence of the site's common organic card: fail open
-            // (IS-8) and leave every further item untouched. An item this verdict already holds
-            // treated keeps its treatment and its slot, so nothing on screen is ever withdrawn.
             if (want !== "keep" && !charged(key, el)) {
               const budget = modelGroupCap(observedItems) - (claimed.get(key) ?? 0);
               if (liveCharges(key, budget) >= budget) {
@@ -350,11 +306,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
               }
             }
           }
-          // Nothing to judge - no chrome, no follow button, no outbound link, no media - so the
-          // model would be paid for an empty descriptor. `withheldSlots === 0` is load-bearing: a
-          // slot the privacy rule silenced (its text was an author name) leaves chromeText empty
-          // while the card DOES have chrome, and such an item must still be asked about, as a
-          // structure-only descriptor (todo 27 gate finding F1).
           else if (signals.chromeText.length === 0 && signals.withheldSlots === 0 && !signals.followButton && !signals.hasExternalLink && signals.media === "none") want = "keep";
         }
       }
@@ -377,62 +328,36 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         rect: { top: box.top, left: box.left, width: box.width, height: box.height },
         top: reveal && painted ? revealTop(el) : box.top });
     }
-    // Complete every geometry read before the first attribute write.
     for (const { el, want, top, reveal, key, charge: chargeKey, model, rect } of writes) {
       if (el.hasAttribute("data-jev-held") || (reveal && painted && top < innerHeight)) {
         el.setAttribute("data-jev-held", "");
-        // What is on screen is a stale verdict, not the current one: there is nothing to confirm.
         host.overlay.hide(el);
-        // The previous verdict is still the one on screen, so it keeps its slot - and because a
-        // claim is only committed below, the verdict that was not applied takes none.
         continue;
       }
-      // A hide is gone from the page, wherever it is. Only a model verdict is never certain: on
-      // screen it stays a blur with the yes/no prompt, and the user's "yes" (an override) hides it.
       const action: Action = model && want === "hide" && el.getAttribute("data-jev") !== "hide" &&
         onScreen({ pageHasPainted: painted, top, viewportHeight: innerHeight }) ? "blur" : want;
       if (action === "keep") el.removeAttribute("data-jev");
       else el.setAttribute("data-jev", action);
-      // The prompt belongs to a MODEL verdict that was BLURRED on screen, and to nothing
-      // else: a deterministic verdict is per-item evidence that needs no confirmation, a module is
-      // not a feed item, and a hidden item is not on screen to point at. A zero-sized box has no
-      // place to put a prompt either.
       if (model && action === "blur" && origin && rect.width > 0 && rect.height > 0) {
         host.overlay.show(el, key, rect, origin);
       } else host.overlay.hide(el);
-      // The charge follows the treatment that is now on screen: this verdict takes the slot, or a
-      // verdict whose treatment just went away (revealed, recycled, re-keyed) gives one back.
       if (chargeKey !== undefined) charge(chargeKey, el);
       else if (action === "keep" || !charged(key, el)) uncharge(el);
       qa.applyPaths.set(el, applyPath);
     }
-    // One report per newly over-cap key, so the options page can name the signature to reset.
     if (overCapped.size > reportedOverCap) {
       reportedOverCap = overCapped.size;
       host.overCap([...overCapped]);
     }
-    // Every re-layout the page does silently - content inserted above a prompted item, a cell
-    // re-positioned, an item detached - reaches the scanner as a flush and nothing else. A prompt
-    // is never moved to follow, so one that no longer covers its item is dropped here. Free while
-    // no prompt is up, and it also re-checks geometry this flush's own writes may have changed.
     host.overlay.revalidate();
     schedule();
   }
 
-  /**
-   * A user answer replaces the model's guess about that whole skeleton. Both decisions re-run the
-   * normal placement path for every item of the key, so no treatment is ever written outside the
-   * one rule: "keep" releases them - an already hidden item inside the viewport still stays hidden
-   * for this page view, because revealing it would move content under the cursor (IS-3/D6), and
-   * the next navigation starts it from the override - while "confirmed" keeps what is on screen.
-   */
   function answered(key: string, decision: OverrideDecision) {
     answerEpoch++;
     overrides = { entries: { ...overrides.entries, [key]: { decision, at: Date.now() } } };
     host.override(key, decision);
-    // The model verdict's cap slots go back either way: the user has now judged this key, so it is
-    // no longer a shared guess spending this page view's budget.
-    for (const member of [...(charges.get(key) ?? [])]) uncharge(member);
+    for (const member of Array.from(charges.get(key) ?? [])) uncharge(member);
     if (decision === "keep" && overCapped.delete(key)) reportedOverCap--;
     for (const [el, state] of states) {
       if (state.key !== key) continue;
@@ -446,7 +371,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   const applyRO = host.resize(() => flush("ro"));
   const nearIO = host.intersection((elements) => { for (const el of elements) priority.add(el); });
   const disconnectMO = host.mutations((records) => {
-    const started = host.now();
     navigation();
     if (!active()) return;
     const added = new Set<Element>();
@@ -458,8 +382,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
       for (let cur = node; cur; cur = cur.parentElement) if (added.has(cur)) return true;
       return false;
     };
-    // At document_start the new body covers every feed item. One document
-    // traversal replaces enumerating thousands of its parser child records.
     const body = document.body;
     const bodyInserted = body !== null && records.some(record =>
       record.target === document.documentElement && [...record.addedNodes].includes(body)
@@ -467,7 +389,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (bodyInserted) collect(document.documentElement, candidates);
     else for (const record of records) {
       if (record.target instanceof Element) {
-        // A newly inserted parent already covers its parser descendant records.
         if (insideAdded(record.target)) continue;
         touched.add(record.target);
       }
@@ -479,8 +400,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
         if (node.parentElement) touched.add(node.parentElement);
       }
     }
-    // Parser records include both a parent and its descendants. Traverse each
-    // inserted subtree once, then register each matching item once this delivery.
     for (const el of added) if (!insideAdded(el.parentElement)) collect(el, candidates);
     for (const el of touched) {
       if (insideAdded(el)) continue;
@@ -491,7 +410,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     }
     for (const el of candidates) observe(el);
     if (inUpdate) flush("mutation");
-    if (globalThis.__JEV_QA_ENABLE__ === true) qa.callbackDurations.push(host.now() - started);
   });
 
   host.overlay.answers(answered);
@@ -503,12 +421,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     if (stopped || document.hidden) { frameId = undefined; inUpdate = false; return; }
     frameId = host.frame(frame);
     inUpdate = true;
-    // PaintTiming entries can arrive frames late. Snapshot content now, not in
-    // the task: an item connected after a blank frame has not been presented.
-    // checkVisibility is the rendered-box predicate: a cell parked inside a
-    // display:none ancestor reports its own display:block, so getComputedStyle
-    // would witness a frame that showed nothing. It is false while detached and
-    // for items this scanner hid, which keeps the blank frame a non-witness.
     const contentFrame = !contentFramePainted && [...pending, ...states.keys()].some(
       (el) => el.checkVisibility()
     );
@@ -528,7 +440,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
   document.addEventListener("DOMContentLoaded", initial);
   visibility();
   initial();
-  // No await precedes observer installation or the default-settings initial scan.
   const settingsPromise = host.settings().catch(() => DEFAULT_SETTINGS);
   const cachePromise = host.cache().catch(() => undefined);
   void settingsPromise.then((loaded) => {
@@ -547,8 +458,6 @@ export function startScanner(cfg: SiteConfig, host: ScanHost = browserHost(cfg))
     initial();
   });
   const overridesPromise = host.overrides().catch(() => undefined);
-  // One gate for both: an unknown item waits until the user's answers are known, so a key the
-  // user already judged can never produce a model request on a fresh page load.
   void Promise.all([settingsPromise, cachePromise, overridesPromise]).then(([, loaded, stored]) => {
     if (stopped) return;
     cache = ensureCurrent(loaded, today(), providerKey(settings)); cacheReady = true;

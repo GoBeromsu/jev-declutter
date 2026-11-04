@@ -55,7 +55,7 @@ describe("openai decisions adapter", () => {
       { role: "developer", content: [{ type: "input_text", text: RUBRIC }] },
       { role: "user", content: [{ type: "input_json", data: { site: "x", items: [item(0), item(1)] } }] }
     ]);
-    expect(c.body.questions).toEqual(questionsFor(2).map((q) => ({ type: "predicate", ...q })));
+    expect(c.body.questions).toEqual(questionsFor(2).map((q) => Object.assign({ type: "predicate" }, q)));
     expect(c.body.questions.map((q: any) => q.name)).toEqual(["i0_ad", "i0_suggested", "i1_ad", "i1_suggested"]);
     expect(res.model).toBe("gpt-6-luna-x");
     expect(res.scores).toEqual([

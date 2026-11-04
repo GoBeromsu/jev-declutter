@@ -61,8 +61,9 @@ bun run dev          # WXT 개발 서버: 개발 빌드가 로드된 Chrome을 �
 bun run build        # WXT 배포 빌드: .output/chrome-mv3
 bun test             # 단위·fixture 테스트 (happy-dom)
 bun run typecheck    # tsc --noEmit
-bun run qa           # fixture 스크롤 QA (headless Chrome): 시프트·플래시·메인스레드 시간 측정
 ```
+
+확인 순서, 주석 금지 규칙, 수동 성능 확인, 번들 예산은 `AGENTS.md`에 있다.
 
 - `src/sites.ts`의 selector는 2026년 마크업 증거(uBlock uAssets/EasyList, 유지되는 extension들)에 기반한다. 사이트가 바뀌면 `tests/fixtures/<site>-<lang>.html`로 재현하고 selector와 fixture를 함께 고친다.
 - 마커 단어와 임계값은 `src/markers.ts`, `src/decide.ts`에 있다. 설정 페이지에서 오늘의 판정 표와 예산 사용량을 볼 수 있고, 캐시를 비울 수 있다(설정 변경과 캐시 초기화는 다음 페이지 이동부터 적용).
@@ -87,4 +88,4 @@ Aside 브라우저에 자기 탭을 열어 `https://www.linkedin.com/feed/`를 �
 
 `adDetected < adMarkerItems`면 label slot이 깨진 것이고, `organicFalseMarked > 0`이면 일반 글에 판정이 붙은 것이다. 둘 중 하나라도 걸리거나 아이템을 하나도 못 보면 종료 코드 1(`checks` 필드에 어느 쪽인지 나온다). 마커 기준은 `labelSlots`과 **독립적으로** 계산한다(본문 영역 밖 헤더의 짧은 텍스트 노드를 직접 훑는다). 그래서 slot이 사라지면 마커는 그대로 보이고 판정만 빠져 미검출로 드러난다 — 이 실패 제어는 `tests/probe.test.ts`가 고정한다.
 
-숫자가 어긋나면 `src/sites.ts`의 LinkedIn selector와 `tests/fixtures/linkedin-react-*.html`을 같이 고친다. 규칙과 한계(본문 아래로 옮겨간 마커, 구조 기반 광고 속성)는 `scripts/probe/linkedin-count.ts` 주석에 적혀 있다.
+숫자가 어긋나면 `src/sites.ts`의 LinkedIn selector와 `tests/fixtures/linkedin-react-*.html`을 같이 고친다. 마커 기준의 한계: 본문 컨테이너(`bodyExclude`) 아래로 옮겨간 마커는 읽지 않고, 텍스트 라벨 없이 구조(광고 속성)로만 잡히는 광고에는 마커가 없다. 이런 아이템은 현재 설정이 여전히 판정을 붙일 때만 `organicFalseMarked > 0`으로 드러난다. 마커가 본문 아래로 가면서 label slot에서도 빠져 판정까지 사라지면, 마커 수와 판정 수가 함께 줄어 probe는 아무것도 알리지 못한다.

@@ -1,20 +1,9 @@
 import type { SiteId } from "./types";
 
-/**
- * The user's own answer about one signalKey, taken from the overlay prompt on a model-blurred item.
- * "keep": not an ad - release every item of that skeleton. "confirmed": it is an ad - keep treating it.
- *
- * Precedence is deterministic > user override > cache/model (src/scan.ts): a deterministic signal is
- * per-item evidence that needs no confirmation, while an override replaces a model guess about a
- * skeleton and therefore also short-circuits the request for that key - answering costs no network
- * call, now or later.
- */
 export type OverrideDecision = "keep" | "confirmed";
 
-/** Stored per answer: nothing but the opaque signalKey, the decision and when it was given. */
 export interface OverrideEntry {
   decision: OverrideDecision;
-  /** Epoch ms, local clock. */
   at: number;
 }
 
@@ -42,11 +31,6 @@ function entryOf(value: unknown): OverrideEntry | undefined {
   return { decision, at };
 }
 
-/**
- * No day and no providerKey: an answer is the user's verdict, not a cached model one, so nothing
- * here expires with the daily cache (`resetCaches` in src/background.ts only clears `sig:` and
- * `overcap:` keys). Unknown fields in a stored record are dropped rather than carried forward.
- */
 export function normalizeOverrides(value: unknown): OverrideMap {
   if (!isRecord(value) || !isRecord(value.entries)) return emptyOverrides();
   const entries: Record<string, OverrideEntry> = {};
@@ -70,7 +54,6 @@ export async function loadOverrides(site: SiteId): Promise<OverrideMap> {
 
 let queue: Promise<unknown> = Promise.resolve();
 
-/** Serializes read-modify-write, so two answers in the same tick cannot drop one another. */
 function serialize<T>(work: () => Promise<T>): Promise<T> {
   const run = queue.then(work);
   queue = run.catch(() => undefined);

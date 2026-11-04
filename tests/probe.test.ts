@@ -21,11 +21,6 @@ const make = (html: string): Element => {
 
 const slots = (cfg: SiteConfig): string[] => cfg.labelSlots.split(",").map((s) => s.trim());
 
-/**
- * THE FAILING CONTROL CONFIG: the shipped LinkedIn config with its React label slots removed -
- * every keyed selector drops out, leaving exactly the four legacy ones the config carried before
- * todo 18. Derived from the shipped value rather than copied, so it cannot drift away from it.
- */
 const NO_REACT_SLOTS: SiteConfig = {
   ...CFG,
   labelSlots: slots(CFG)
@@ -33,7 +28,6 @@ const NO_REACT_SLOTS: SiteConfig = {
     .join(", ")
 };
 
-/** No label can be read at all: used to prove the ground truth needs no slot whatsoever. */
 const NO_SLOTS: SiteConfig = { ...CFG, labelSlots: ":not(*)" };
 
 const EXPECTED: Record<string, DriftCounts> = {
@@ -75,7 +69,6 @@ describe("drift probe over the LinkedIn React fixtures", () => {
 
       test("ACCEPTANCE: every ad marker is detected and no organic item is marked", () => {
         const counts = countDrift(load(file), CFG);
-        // Non-vacuous: 0 == 0 must not be able to pass this.
         expect(counts.adMarkerItems).toBeGreaterThan(0);
         expect(counts.itemsSeen).toBeGreaterThanOrEqual(18);
         expect(counts.adDetected).toBe(counts.adMarkerItems);
@@ -87,11 +80,9 @@ describe("drift probe over the LinkedIn React fixtures", () => {
         expect(counts.adDetected).toBeLessThan(counts.adMarkerItems);
         expect(counts.adDetected).toBe(0);
         expect(counts.suggestedDetected).toBeLessThan(counts.suggestedMarkerItems);
-        // The ground truth is unmoved by the config change - that is what makes the miss visible.
         expect(counts.adMarkerItems).toBe(EXPECTED[file]!.adMarkerItems);
         expect(counts.suggestedMarkerItems).toBe(EXPECTED[file]!.suggestedMarkerItems);
         expect(counts.itemsSeen).toBe(EXPECTED[file]!.itemsSeen);
-        // A lost slot must stay fail-open: nothing is marked wrongly, and nothing is read at all.
         expect(counts.organicFalseMarked).toBe(0);
         expect(counts.maxChromeLen).toBe(0);
       });
@@ -105,8 +96,6 @@ describe("drift probe over the LinkedIn React fixtures", () => {
 
       test("body text cannot manufacture a marker", () => {
         const doc = load(file);
-        // adSentence/bodyNeg carry marker words inside the post body; bodyFollow carries a
-        // Follow button there; injection carries a prompt-injection string.
         for (const kind of ["adSentence", "bodyNeg", "injection", "bodyFollow", "unknown", "organic"]) {
           const el = doc.querySelector(`[data-qa-kind="${kind}"]`)!;
           expect(headerMarkers(el, CFG)).toEqual({ ad: false, suggested: false });
@@ -197,10 +186,6 @@ describe("the ground-truth region rule", () => {
 
 describe("what the counts mean on legacy LinkedIn markup", () => {
   test("structural ads and follow-only items land in organicFalseMarked, by design", () => {
-    // The ground truth is LABEL-based: it cannot see an ad that is marked by an attribute, nor a
-    // suggested item that is only a Follow button. The legacy fixtures have 2 of the former and 1
-    // of the latter, so they report 3 - which is why this probe is read on the React feed, where
-    // adSelectors and followSlot match nothing. Pinned so the asymmetry stays a known quantity.
     for (const file of ["linkedin-en.html", "linkedin-ko.html"]) {
       const doc = load(file);
       expect(doc.querySelectorAll(CFG.adSelectors.join(",")).length).toBe(2);
@@ -211,15 +196,13 @@ describe("what the counts mean on legacy LinkedIn markup", () => {
     for (const file of REACT) {
       const doc = load(file);
       expect(doc.querySelectorAll(CFG.adSelectors.join(",")).length).toBe(0);
-      expect(doc.querySelectorAll(CFG.followSlot).length).toBe(1); // the body-nested negative only
+      expect(doc.querySelectorAll(CFG.followSlot).length).toBe(1);
     }
   });
 });
 
 describe("the browser bundle the runner evaluates", () => {
   test("the bundled page entry produces the same counts as the module", async () => {
-    // Proves the maintainer path works, not just the module: build the real IIFE, run it in this
-    // global, and compare the global's counts with a direct call.
     const bundle = await buildPageBundle();
     expect(bundle.length).toBeGreaterThan(0);
     new Function(bundle)();

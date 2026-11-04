@@ -7,38 +7,9 @@ export const DAILY_REQUEST_BUDGET = 300;
 export const PER_MINUTE_CAP = 30;
 export const MAX_ITEMS = 20;
 
-/**
- * How many DISTINCT items one MODEL-derived verdict (a daily-cache hit or a fresh answer) may
- * hold treated per signalKey per page view. Past it the group size is itself the evidence: a
- * skeleton shared by that share of one feed is the site's ordinary organic card, so the scanner
- * stops applying that verdict and fails open (IS-8). Deterministic verdicts are per-item evidence
- * and are never counted or capped; neither are module verdicts.
- *
- * The cap is share-relative, not absolute, because BOTH sides of the comparison scale with session
- * length: the organic blast radius is a share of the feed (what the user sees as "most of my feed
- * vanished") and a real ad group is also a share (5-9% on the model path in the fixtures, 24-27%
- * for live deterministic ads). An absolute number cannot separate them once the feed is long, and
- * it is calibrated on whatever the deepest fixture happened to reach.
- *
- *   cap = max(MIN_MODEL_GROUP, round(MODEL_GROUP_SHARE * itemsObservedThisPageView))
- *
- * Guarantee: at least 75% of the feed survives one wrong verdict once 60 items have been observed;
- * below that the bound is the floor of 15 items.
- *
- * Measured per page view (.omo/evidence/F3/qa/<fixture>.json, itemTable grouped by descriptor.key;
- * live counts from the todo 16 / F3 live sessions):
- *   stress-x-en        cap 147 vs ad group 32 (4.6x headroom); organic damage 56% -> 25%
- *   x-en / x-ko        cap  31 vs ad group 10 (3.1x)
- *   linkedin-react     cap  25 vs ad group  9 (2.8x)
- *   youtube-en         cap  30 vs ad group  9 (3.3x); its 35-of-120 gap closes to 25%
- *   live x.com         22 cells -> the floor of 15 vs 6 observed ads
- * The floor keeps short page views from capping a legitimately ad-dense feed; the share keeps a
- * deep session from ever starving the ad side, which is what an absolute cap cannot do.
- */
 export const MIN_MODEL_GROUP = 15;
 export const MODEL_GROUP_SHARE = 0.25;
 
-/** itemsObserved counts distinct non-module feed items seen in this page view. */
 export function modelGroupCap(itemsObserved: number): number {
   const share = Number.isFinite(itemsObserved) ? Math.round(MODEL_GROUP_SHARE * itemsObserved) : 0;
   return Math.max(MIN_MODEL_GROUP, share);
@@ -171,7 +142,6 @@ export function tryConsume(state: BudgetState | undefined, now: Date): { ok: boo
   };
 }
 
-/** Diagnostics only, kept out of SignatureCache so the cached verdict format (IS-6) is untouched. */
 export interface OverCapRecord {
   day: string;
   keys: string[];
@@ -192,10 +162,6 @@ export async function loadOverCap(site: SiteId, day: string = today()): Promise<
   return readOverCap(stored[key], day);
 }
 
-/**
- * Remembers which signalKeys exceeded modelGroupCap() today so the options page can name the
- * signature to reset. Merges rather than overwrites: other tabs of the same site also record.
- */
 export async function recordOverCap(site: SiteId, keys: readonly string[], day: string = today()): Promise<void> {
   const storageKey = overCapKey(site);
   const stored = await chrome.storage.local.get(storageKey);
@@ -206,11 +172,6 @@ export async function recordOverCap(site: SiteId, keys: readonly string[], day: 
   await chrome.storage.local.set({ [storageKey]: record });
 }
 
-/**
- * Drops one signalKey from today's over-cap note. A user answer of "not an ad" (src/overrides.ts)
- * releases that verdict's whole group, so the note that asked the maintainer to look at it is
- * answered and must not keep pointing at it.
- */
 export async function clearOverCap(site: SiteId, key: string, day: string = today()): Promise<void> {
   const storageKey = overCapKey(site);
   const stored = await chrome.storage.local.get(storageKey);

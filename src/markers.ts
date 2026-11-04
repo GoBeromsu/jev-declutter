@@ -1,6 +1,3 @@
-// Marker words shown by the sites' own UI chrome (labels, buttons), English and Korean.
-// Matching is EXACT after trim + whitespace collapse + case folding; never substring.
-
 export const AD_WORDS: string[] = ["Sponsored", "Promoted", "Ad", "광고", "프로모션", "Promoted by LinkedIn"];
 
 export const SUGGESTED_WORDS: string[] = [

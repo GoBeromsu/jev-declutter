@@ -1,10 +1,8 @@
 import type { Action, Category, Settings } from "./types";
 
-// Rules live in code, not in the prompt: change a threshold here and only rendering reruns.
 export const HIDE_AT = 0.8;
 export const BLUR_AT = 0.5;
 
-/** Each category is either hidden or left alone: blur is not a setting, it is the "unsure" state. */
 export function actionsOf({ hideAds, hideSuggested }: Pick<Settings, "hideAds" | "hideSuggested">): Record<Category, Action> {
   return { ad: hideAds ? "hide" : "keep", suggested: hideSuggested ? "hide" : "keep" };
 }
@@ -29,7 +27,6 @@ export interface Placement {
   viewportHeight: number;
 }
 
-/** On screen once the page has painted. A NaN top is never trusted to be off-screen. */
 export function onScreen(pos: Placement): boolean {
   return Number.isNaN(pos.top) || (pos.pageHasPainted && !(pos.top >= Math.max(0, pos.viewportHeight)));
 }
@@ -38,7 +35,6 @@ export const ITEM_CSS =
   '[data-jev="hide"]{display:none!important}' +
   '[data-jev="blur"]{filter:blur(10px)!important;opacity:.4!important;pointer-events:none!important;contain:paint!important}';
 
-/** Local calendar day, so the cache rolls over at the user's midnight. */
 export function today(now: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
