@@ -3,3 +3,4 @@ node_modules/
 .wxt/
 *.zip
 .DS_Store
+dist/
