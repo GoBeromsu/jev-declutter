@@ -7,7 +7,7 @@ import { DEFAULT_TYPESAFE_MODEL } from "../src/providers/typesafe";
 import { DEFAULT_SETTINGS, budgetKey, sigKey } from "../src/storage";
 import type { Settings, SiteId } from "../src/types";
 
-const HTML = await Bun.file(`${import.meta.dir}/../public/options.html`).text();
+const HTML = await Bun.file(`${import.meta.dir}/../entrypoints/options/index.html`).text();
 
 const SITES: SiteId[] = ["youtube", "x", "instagram", "linkedin"];
 
@@ -108,7 +108,7 @@ test("markup: lang=ko, masked key fields, no remote assets, no free-text goal fi
     expect(input(doc, id).getAttribute("autocomplete")).toBe("off");
   }
   expect(doc.querySelectorAll("textarea").length).toBe(0);
-  expect(Array.from(doc.querySelectorAll("script")).map((s) => s.getAttribute("src"))).toEqual(["options.js"]);
+  expect(Array.from(doc.querySelectorAll("script")).map((s) => s.getAttribute("src"))).toEqual(["../../src/options.ts"]);
   expect(doc.querySelectorAll("link, iframe, img, video, audio, object, embed").length).toBe(0);
   expect(HTML).not.toMatch(/https?:\/\//);
   expect(HTML).not.toMatch(/@import/);

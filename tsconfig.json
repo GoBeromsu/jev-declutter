@@ -20,6 +20,8 @@
   "include": [
     "src",
     "scripts",
-    "tests"
+    "tests",
+    "entrypoints",
+    "wxt.config.ts"
   ]
 }

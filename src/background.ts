@@ -189,7 +189,14 @@ function activeModel(raw: unknown): string {
   return `${raw.provider}:${typeof model === "string" ? model : ""}`;
 }
 
-chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
+/** Registers every listener; call synchronously at service-worker start so wake-up events are not missed. */
+export function startBackground(): void {
+  chrome.runtime.onMessage.addListener(onMessage);
+  chrome.storage.onChanged.addListener(handleStorageChange);
+  chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());
+}
+
+function onMessage(msg: unknown, _sender: chrome.runtime.MessageSender, sendResponse: (r: unknown) => void): boolean {
   if (!isRecord(msg)) return false;
   if (msg.type === "classify") {
     handleClassify(msg as ClassifyMessage).then(sendResponse);
@@ -203,7 +210,7 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, sendResponse) => {
     return true;
   }
   return false;
-});
+}
 
 export async function handleStorageChange(
   changes: Record<string, chrome.storage.StorageChange>,
@@ -219,6 +226,3 @@ export async function handleStorageChange(
   }
 }
 
-chrome.storage.onChanged.addListener(handleStorageChange);
-
-chrome.action.onClicked.addListener(() => chrome.runtime.openOptionsPage());

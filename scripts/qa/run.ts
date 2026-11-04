@@ -1039,7 +1039,7 @@ const helperBuild = await Bun.build({
 });
 if (!helperBuild.success || !helperBuild.outputs[0]) throw new Error("QA helper bundle failed: " + helperBuild.logs.join("\n"));
 const shim = await helperBuild.outputs[0].text() + "\n" + await Bun.file(root + "/scripts/qa/chrome-shim.js").text() + "\n" + drivers;
-const content = await Bun.file(root + "/dist/content.js").text();
+const content = await Bun.file(root + "/.output/chrome-mv3/content-scripts/content.js").text();
 const server = Bun.serve({
   hostname: "127.0.0.1", port: 0,
   async fetch(request) {

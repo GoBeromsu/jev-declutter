@@ -1,18 +1,21 @@
 {
   "name": "jev-declutter",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun run scripts/build.ts",
-    "qa": "bun run build && bun run scripts/qa/run.ts",
+    "dev": "wxt",
+    "build": "wxt build",
+    "qa": "wxt build && bun run scripts/qa/run.ts",
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "postinstall": "wxt prepare"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^21.0.4",
     "@types/bun": "^1.4.4",
     "@types/chrome": "^0.3.7",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "wxt": "^0.21.5"
   }
 }

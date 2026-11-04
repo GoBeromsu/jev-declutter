@@ -1,5 +1,5 @@
 // QA-only stand-in for the extension APIs the content script uses. Served by scripts/qa/run.ts
-// right after the inline QA script and before dist/content.js. run.ts prepends a small bundle
+// right after the inline QA script and before the built content script. run.ts prepends a small bundle
 // that defines globalThis.__JEV_QA_SRC__ (keyOf, DEFAULT_SETTINGS, sigKey, providerKey, today),
 // built from src/, so this shim speaks the exact storage and signalKey formats of the code under test.
 //

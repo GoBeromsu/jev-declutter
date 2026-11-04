@@ -37,23 +37,28 @@ YouTube, X, Instagram, LinkedIn 피드에서 광고(스폰서·프로모션), �
 
 Aside는 Chromium 포크다. 확장 프로그램은 `aside://extensions`(= `chrome://extensions/`)에서 압축 해제된(load unpacked) 형태로 넣는다. Developer mode와 "Load unpacked" 버튼은 존재하지만, 폴더 선택은 macOS 기본 패널이라 자동화할 수 없다 — 아래 클릭 몇 번은 직접 한다.
 
-1. 메인 체크아웃에서 빌드해 `dist/`를 만든다:
+1. 메인 체크아웃에서 빌드해 `.output/chrome-mv3/`를 만든다(개발 중이면 `bun run dev`가 만드는 `.output/chrome-mv3-dev/`):
    ```bash
    cd /Users/beomsu/Projects/jev-declutter
    bun install && bun run build
    ```
 2. Aside에서 `aside://extensions`를 연다.
 3. 상단 배너의 **Developer mode** 스위치를 켠다. "Load unpacked / Pack extension / Update" 버튼이 나타난다.
-4. **Load unpacked**를 누르고 열린 패널에서 `/Users/beomsu/Projects/jev-declutter/dist` 를 선택한다.
-   메인 체크아웃 경로를 한 번만 등록하면, 이후 재빌드 때는 카드의 새로고침(↻) 버튼만 누르면 된다.
+4. **Load unpacked**를 누르고 열린 패널에서 `/Users/beomsu/Projects/jev-declutter/.output/chrome-mv3` (개발용은 `.output/chrome-mv3-dev`)를 선택한다.
+   경로를 한 번만 등록하면, 이후 `bun run build` 때는 카드의 새로고침(↻) 버튼만 누르면 된다. `bun run dev`를 켜 두면 그것도 필요 없다.
+   폴더마다 확장 ID와 `chrome.storage`가 따로라서, 개발용과 배포용에 API key를 각각 넣는다.
 5. 새 카드에 표시되는 확장 ID(`ID: ...`)를 기록한다. 설정 페이지는 `chrome-extension://<ID>/options.html` 이고, 퍼즐 조각 메뉴에서 고정해 둘 수 있다.
 6. 설정 페이지에서 provider를 고르고 API key를 넣는다. 그다음 YouTube / X / Instagram / LinkedIn 피드를 열어 확인한다.
 
 ## 개발
 
+빌드는 [WXT](https://wxt.dev)가 한다. 진입점은 `entrypoints/`(background·content·options)에 얇게 있고, 로직은 전부 `src/`에 있다. manifest는 `wxt.config.ts`에서 만든다. 개발 빌드는 hot reload를 위해 `tabs`·`scripting` 권한을 더하지만, 배포 빌드에는 들어가지 않는다(`tests/manifest.test.ts`가 실제 `wxt build` 결과로 확인).
+
 ```bash
 bun install
-bun run build        # dist/ (IIFE 번들 3개 + public/ 복사)
+bun run dev          # WXT 개발 서버: .output/chrome-mv3-dev 를 만들고 저장할 때마다 hot reload
+                     #   (설정 페이지는 Vite HMR, background/content 는 확장 재시작 + 열린 피드 탭 새로고침)
+bun run build        # WXT 배포 빌드: .output/chrome-mv3
 bun test             # 단위·fixture 테스트 (happy-dom)
 bun run typecheck    # tsc --noEmit
 bun run qa           # fixture 스크롤 QA (headless Chrome): 시프트·플래시·메인스레드 시간 측정

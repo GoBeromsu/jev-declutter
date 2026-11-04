@@ -1,11 +1,26 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { cp, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const MANIFEST_PATH = join(ROOT, "public", "manifest.json");
+
+/** The manifest only exists after a build, so every check below runs on a real `wxt build` in a scratch copy. */
+async function buildManifest(): Promise<string> {
+  const out = mkdtempSync(join(tmpdir(), "jev-build-layout-"));
+  for (const entry of ["src", "entrypoints"]) await cp(join(ROOT, entry), join(out, entry), { recursive: true });
+  for (const file of ["wxt.config.ts", "package.json", "tsconfig.json"]) await cp(join(ROOT, file), join(out, file));
+  await symlink(join(ROOT, "node_modules"), join(out, "node_modules"));
+  const build = Bun.spawn([process.execPath, "x", "wxt", "build"], { cwd: out, stdout: "pipe", stderr: "pipe" });
+  const [stdout, stderr] = await Promise.all([new Response(build.stdout).text(), new Response(build.stderr).text()]);
+  if ((await build.exited) !== 0) throw new Error(`wxt build failed\n${stdout}\n${stderr}`);
+  return join(out, ".output", "chrome-mv3");
+}
+
+const OUT = await buildManifest();
+process.on("exit", () => rmSync(join(OUT, "..", ".."), { recursive: true, force: true }));
+const MANIFEST_PATH = join(OUT, "manifest.json");
 
 interface Manifest {
   manifest_version?: number;
@@ -41,7 +56,7 @@ export function manifestIssues(m: Manifest): string[] {
   if (scripts.length === 0) issues.push("no content_scripts");
   scripts.forEach((cs, i) => {
     if (!cs.matches?.includes("https://www.linkedin.com/*")) issues.push(`content_scripts[${i}] lacks the linkedin match`);
-    if (!cs.js?.includes("content.js")) issues.push(`content_scripts[${i}] lacks content.js`);
+    if (!cs.js?.some((js) => js.endsWith("content.js"))) issues.push(`content_scripts[${i}] lacks content.js`);
     if ("css" in cs) issues.push(`content_scripts[${i}] has a css entry`);
     if (cs.run_at !== "document_start") issues.push(`content_scripts[${i}] run_at is ${String(cs.run_at)}`);
   });
@@ -57,7 +72,7 @@ export function manifestIssues(m: Manifest): string[] {
   return issues;
 }
 
-describe("public/manifest.json", () => {
+describe("built manifest.json", () => {
   const manifest = loadManifest();
 
   test("is valid MV3 without forbidden surface", () => {
@@ -81,36 +96,12 @@ describe("public/manifest.json", () => {
     expect(manifestIssues(mutated)).toContain("content_scripts[0] lacks the linkedin match");
   });
 
-  test("build layout: the real build puts manifest.json and options.html at the dist root", async () => {
-    const out = mkdtempSync(join(tmpdir(), "jev-build-layout-"));
-    try {
-      await cp(join(ROOT, "src"), join(out, "src"), { recursive: true });
-      await cp(join(ROOT, "public"), join(out, "public"), { recursive: true });
-      await cp(join(ROOT, "scripts", "build.ts"), join(out, "scripts", "build.ts"));
-      mkdirSync(join(out, "dist"));
-      const build = Bun.spawn([process.execPath, "run", "scripts/build.ts"], {
-        cwd: out,
-        stdout: "pipe",
-        stderr: "pipe"
-      });
-      const [stdout, stderr] = await Promise.all([new Response(build.stdout).text(), new Response(build.stderr).text()]);
-      const exitCode = await build.exited;
-      expect({ exitCode, stdout, stderr }).toMatchObject({ exitCode: 0 });
-
-      const manifestAtRoot = join(out, "dist", "manifest.json");
-      expect(existsSync(manifestAtRoot)).toBe(true);
-      expect(existsSync(join(out, "dist", "options.html"))).toBe(true);
-      for (const bundle of ["background.js", "content.js", "options.js"]) {
-        expect(existsSync(join(out, "dist", bundle))).toBe(true);
-      }
-      expect(existsSync(join(out, "dist", "public"))).toBe(false);
-      const shipped = JSON.parse(readFileSync(manifestAtRoot, "utf8")) as Manifest;
-      expect(shipped.content_scripts?.[0]?.matches).toContain("https://www.linkedin.com/*");
-      expect(manifestIssues(shipped)).toEqual([]);
-    } finally {
-      rmSync(out, { recursive: true, force: true });
+  test("build layout: manifest, options page and the three bundles sit where an unpacked load finds them", () => {
+    for (const file of ["manifest.json", "options.html", "background.js", "content-scripts/content.js"]) {
+      expect(existsSync(join(OUT, file))).toBe(true);
     }
-  }, 60_000);
+    expect(manifest.options_ui).toEqual({ open_in_tab: true, page: "options.html" });
+  });
 
   test("mutation: a css entry and a forbidden permission are reported", () => {
     const mutated = structuredClone(manifest);

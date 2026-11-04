@@ -47,10 +47,12 @@ const restartWorker = async (): Promise<{ bg: Background; cache: Cache }> => {
   delete require.cache[require.resolve("../src/background.ts")];
   const cache = (await import("../src/cache")) as Cache;
   const bg = (await import("../src/background")) as Background;
+  bg.startBackground();
   return { bg, cache };
 };
 
 const bg: Background = await import("../src/background");
+bg.startBackground();
 
 const NOW = new Date(2026, 9, 28, 12, 0, 0);
 
